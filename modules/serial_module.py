@@ -20,6 +20,14 @@ class SerialCommunicationHandler:
     REMINDER_POSTURE = 2   # 坐姿提醒
     REMINDER_VOICE = 3     # 语音交互
 
+    # 坐姿提醒子类型（使用帧字节11之后的字节）
+    POSTURE_WARN_NONE = 0x00      # 无警告
+    POSTURE_WARN_NECK = 0x01      # 颈部前倾
+    POSTURE_WARN_SHOULDER = 0x02   # 肩部倾斜
+    POSTURE_WARN_SPINE = 0x03      # 脊柱弯曲
+    POSTURE_WARN_HEAD = 0x04       # 头部侧倾
+    POSTURE_WARN_MULTIPLE = 0x0F   # 多个问题
+
     # 通信协议常量
     FRAME_HEADER = b's'
     FRAME_TAIL = b'e'
@@ -32,6 +40,7 @@ class SerialCommunicationHandler:
     CMD_TYPE_SITTING = 0xA2    # 久坐提醒
     CMD_TYPE_ALERT = 0xA3      # 警报指令
     CMD_TYPE_LIGHT = 0xA4      # 照明控制
+    CMD_TYPE_VOICE = 0xA5      # 语音控制指令（新增）
 
     # 照明控制字段偏移量（使用保留字节区域）
     LIGHT_BRIGHTNESS_OFFSET = 12  # 亮度值偏移量（4字节浮点数）
@@ -43,6 +52,19 @@ class SerialCommunicationHandler:
     LIGHT_MODE_AUTO = 0x01       # 自动模式
     LIGHT_MODE_READING = 0x02    # 阅读模式
     LIGHT_MODE_REST = 0x03       # 休息模式
+
+    # 照明控制常量
+    MIN_COLOR_TEMP = 3000.0  # 最小色温值 (K)
+    MAX_COLOR_TEMP = 6500.0  # 最大色温值 (K)
+    MIN_BRIGHTNESS = 0.0     # 最小亮度值 (%)
+    MAX_BRIGHTNESS = 100.0   # 最大亮度值 (%)
+
+    # 语音交互相关常量
+    VOICE_CMD_START = 0x01    # 开始语音交互
+    VOICE_CMD_STOP = 0x02     # 停止语音交互
+    VOICE_CMD_PAUSE = 0x03    # 暂停语音交互
+    VOICE_CMD_RESUME = 0x04   # 恢复语音交互
+    VOICE_CMD_VOLUME = 0x05   # 调节音量
 
     def __init__(self, port=None, baudrate=115200):
         self.handler = SerialHandler(port=port, baudrate=baudrate)
@@ -217,6 +239,63 @@ class SerialCommunicationHandler:
             log_manager.error(f"发送久坐提醒失败: {e}")
             return False
     
+    def send_posture_warning(self, warning_types):
+        """发送坐姿警告
+        
+        Args:
+            warning_types: 警告类型列表，可以包含多个警告
+            
+        Returns:
+            bool: 发送是否成功
+        """
+        try:
+            frame = bytearray(self.FRAME_LENGTH)
+            frame[0] = ord(self.FRAME_HEADER)
+            frame[1] = self.CMD_TYPE_POSTURE
+            
+            # 设置提醒类型为坐姿提醒
+            frame[11] = self.REMINDER_POSTURE
+            
+            # 根据警告类型设置具体的提醒子类型
+            if not warning_types:
+                frame[12] = self.POSTURE_WARN_NONE
+            elif len(warning_types) == 1:
+                warning_map = {
+                    'WARN_NECK_BEND': self.POSTURE_WARN_NECK,
+                    'WARN_SHOULDER_TILT': self.POSTURE_WARN_SHOULDER,
+                    'WARN_SPINE_BEND': self.POSTURE_WARN_SPINE,
+                    'WARN_HEAD_TILT': self.POSTURE_WARN_HEAD
+                }
+                frame[12] = warning_map.get(warning_types[0], self.POSTURE_WARN_NONE)
+            else:
+                frame[12] = self.POSTURE_WARN_MULTIPLE
+                
+            # 当存在多个警告时，在后续字节中记录具体警告类型
+            if len(warning_types) > 1:
+                warning_bits = 0
+                for warning in warning_types:
+                    if 'NECK' in warning:
+                        warning_bits |= (1 << 0)
+                    if 'SHOULDER' in warning:
+                        warning_bits |= (1 << 1)
+                    if 'SPINE' in warning:
+                        warning_bits |= (1 << 2)
+                    if 'HEAD' in warning:
+                        warning_bits |= (1 << 3)
+                frame[13] = warning_bits
+            
+            frame[-1] = ord(self.FRAME_TAIL)
+            
+            with self.lock:
+                self.serial_port.write(frame)
+                log_manager.info(f"发送坐姿提醒: {warning_types}")
+                return True
+                
+        except Exception as e:
+            self.last_error = str(e)
+            log_manager.error(f"发送坐姿提醒失败: {e}")
+            return False
+
     def receive_status(self):
         """接收机械臂状态反馈
         
@@ -292,9 +371,13 @@ class SerialCommunicationHandler:
         """发送照明控制命令
         
         Args:
-            brightness: 亮度值 (0.0-100.0)
-            color_temp: 色温值 (2700-6500K)
-            mode: 照明模式
+            brightness: 亮度值 (0.0-100.0)，表示灯光亮度的百分比
+            color_temp: 色温值 (3000-6500K)，较低的值产生暖光，较高的值产生冷光
+            mode: 照明模式，可选值：
+                  LIGHT_MODE_MANUAL(0): 手动模式
+                  LIGHT_MODE_AUTO(1): 自动模式
+                  LIGHT_MODE_READING(2): 阅读模式
+                  LIGHT_MODE_REST(3): 休息模式
             
         Returns:
             bool: 发送是否成功
@@ -302,7 +385,7 @@ class SerialCommunicationHandler:
         try:
             # 参数验证
             brightness = max(0.0, min(100.0, brightness))
-            color_temp = max(2700.0, min(6500.0, color_temp))
+            color_temp = max(3000.0, min(6500.0, color_temp))
             mode = max(0, min(3, mode))
 
             frame = bytearray(self.FRAME_LENGTH)
@@ -384,3 +467,101 @@ class SerialCommunicationHandler:
         if hasattr(self.handler, 'start_frame_monitor'):
             self.handler.start_frame_monitor(callback=frame_callback)
             print("已启动帧数据监控")
+
+    def _build_voice_frame(self, command, params=None):
+        """构建语音交互帧
+        
+        Args:
+            command: 语音命令类型
+            params: 可选的参数字典
+        """
+        frame = bytearray(self.FRAME_LENGTH)
+        frame[0] = ord(self.FRAME_HEADER)  # 帧头
+        frame[1] = self.CMD_TYPE_VOICE     # 语音指令类型
+        
+        # 设置提醒类型为语音交互
+        frame[11] = self.REMINDER_VOICE
+        
+        # 设置具体命令类型
+        frame[12] = command
+        
+        # 处理参数
+        if params:
+            # 音量参数（0-100）
+            if 'volume' in params:
+                frame[13] = min(100, max(0, params['volume']))
+            
+            # 语音持续时间（秒）
+            if 'duration' in params:
+                struct.pack_into('H', frame, 14, params['duration'])
+                
+            # 其他参数可以放在保留字节中
+            if 'data' in params:
+                data_bytes = params['data'].encode('utf-8')[:16]  # 最多16字节
+                frame[16:16+len(data_bytes)] = data_bytes
+        
+        frame[-1] = ord(self.FRAME_TAIL)   # 帧尾
+        return frame
+        
+    def send_voice_command(self, command_type, **params):
+        """发送语音控制命令
+        
+        Args:
+            command_type: 命令类型（START/STOP/PAUSE/RESUME/VOLUME）
+            **params: 可选参数，如音量、持续时间等
+        
+        Returns:
+            bool: 发送是否成功
+        """
+        try:
+            if not self.is_connected:
+                log_manager.error("串口未连接")
+                return False
+                
+            # 构建命令帧
+            frame = self._build_voice_frame(command_type, params)
+            
+            with self.lock:
+                self.serial_port.write(frame)
+                log_manager.info(f"发送语音命令：类型={command_type}, 参数={params}")
+                return True
+                
+        except Exception as e:
+            self.last_error = str(e)
+            log_manager.error(f"发送语音命令失败: {e}")
+            return False
+    
+    def start_voice_interaction(self, volume=80):
+        """开始语音交互"""
+        return self.send_voice_command(VOICE_CMD_START, volume=volume)
+    
+    def stop_voice_interaction(self):
+        """停止语音交互"""
+        return self.send_voice_command(VOICE_CMD_STOP)
+    
+    def pause_voice_interaction(self):
+        """暂停语音交互"""
+        return self.send_voice_command(VOICE_CMD_PAUSE)
+    
+    def resume_voice_interaction(self):
+        """恢复语音交互"""
+        return self.send_voice_command(VOICE_CMD_RESUME)
+    
+    def set_voice_volume(self, volume):
+        """设置语音音量
+        
+        Args:
+            volume: 音量值（0-100）
+        """
+        return self.send_voice_command(VOICE_CMD_VOLUME, volume=volume)
+    
+    def _handle_voice_status(self, frame_data):
+        """处理语音状态反馈"""
+        try:
+            if 'voice_status' in frame_data:
+                status = frame_data['voice_status']
+                volume = frame_data.get('volume', 80)
+                log_manager.debug(f"收到语音状态：status={status}, volume={volume}")
+                # 这里可以添加更多处理逻辑
+        except Exception as e:
+            log_manager.error(f"处理语音状态数据失败: {e}")

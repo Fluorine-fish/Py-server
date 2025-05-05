@@ -1,13 +1,43 @@
+"""视力保护模块 - 处理用眼健康相关的功能"""
+
 import cv2
 import numpy as np
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 import logging
-from .logging_module import log_manager
+import plotly.graph_objects as go
+from modules.database_module import DatabaseManager
+from modules.logging_module import log_manager
 
 class EyesightProtector:
     def __init__(self):
+        self.db_manager = DatabaseManager()
+        
+        # 用眼距离标准（单位：厘米）
+        self.distance_thresholds = {
+            'too_close': 30,    # 过近
+            'ideal_min': 35,    # 理想最小距离
+            'ideal_max': 45,    # 理想最大距离
+            'too_far': 50       # 过远
+        }
+        
+        # 环境光照标准（单位：lux）
+        self.light_thresholds = {
+            'too_dark': 300,     # 过暗
+            'ideal_min': 500,    # 理想最小照度
+            'ideal_max': 1500,   # 理想最大照度
+            'too_bright': 2000   # 过亮
+        }
+        
+        # 眨眼频率标准（次/分钟）
+        self.blink_thresholds = {
+            'too_low': 12,      # 过低
+            'ideal_min': 15,    # 理想最小频率
+            'ideal_max': 20,    # 理想最大频率
+            'too_high': 25      # 过高
+        }
+        
         self.screen_time_start = None
         self.last_break_time = None
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
@@ -288,6 +318,215 @@ class EyesightProtector:
         age_params = self.age_group[self.current_age_group]
         self.min_safe_distance = age_params['min_distance']
         self.logger.info(f"更新年龄组为: {self.current_age_group}, 最小安全距离: {self.min_safe_distance}cm")
+
+    def generate_light_radar_chart(self, start_time=None, end_time=None):
+        """生成光照环境雷达图
+        
+        Returns:
+            dict: 包含雷达图数据的字典
+        """
+        records = self.db_manager.get_eyesight_stats(start_time, end_time)
+        if not records:
+            return None
+            
+        # 按照时间段分组计算平均值
+        morning = []    # 6:00-12:00
+        afternoon = []  # 12:00-18:00
+        evening = []    # 18:00-22:00
+        
+        for record in records:
+            hour = record.timestamp.hour
+            if 6 <= hour < 12:
+                morning.append(record.ambient_light)
+            elif 12 <= hour < 18:
+                afternoon.append(record.ambient_light)
+            elif 18 <= hour < 22:
+                evening.append(record.ambient_light)
+        
+        # 计算每个时间段的平均光照强度
+        avg_morning = np.mean(morning) if morning else 0
+        avg_afternoon = np.mean(afternoon) if afternoon else 0
+        avg_evening = np.mean(evening) if evening else 0
+        
+        # 创建雷达图
+        categories = ['早晨 (6-12点)', '下午 (12-18点)', '晚上 (18-22点)']
+        values = [avg_morning, avg_afternoon, avg_evening]
+        
+        fig = go.Figure()
+        
+        # 添加理想范围区域
+        fig.add_trace(go.Scatterpolar(
+            r=[self.light_thresholds['ideal_max']] * 3,
+            theta=categories,
+            fill='none',
+            name='理想上限'
+        ))
+        
+        fig.add_trace(go.Scatterpolar(
+            r=[self.light_thresholds['ideal_min']] * 3,
+            theta=categories,
+            fill='tonext',
+            name='理想范围'
+        ))
+        
+        # 添加实际值
+        fig.add_trace(go.Scatterpolar(
+            r=values,
+            theta=categories,
+            name='实际光照',
+            line=dict(color='rgb(74, 144, 226)')
+        ))
+        
+        # 更新布局
+        fig.update_layout(
+            polar=dict(
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, max(max(values), self.light_thresholds['ideal_max']) * 1.2]
+                )
+            ),
+            showlegend=True,
+            title='光照环境分析'
+        )
+        
+        return fig.to_json()
+    
+    def generate_usage_heatmap(self, start_time=None, end_time=None):
+        """生成用眼时间热力图
+        
+        Returns:
+            dict: 包含热力图数据的字典
+        """
+        records = self.db_manager.get_eyesight_stats(start_time, end_time)
+        if not records:
+            return None
+            
+        # 创建7x24的矩阵存储用眼时间（7天，每天24小时）
+        usage_matrix = np.zeros((7, 24))
+        
+        # 遍历记录，填充矩阵
+        for record in records:
+            day = record.timestamp.weekday()
+            hour = record.timestamp.hour
+            usage_matrix[day][hour] += record.usage_duration / 3600  # 转换为小时
+        
+        # 创建热力图
+        days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+        hours = list(range(24))
+        
+        fig = go.Figure(data=go.Heatmap(
+            z=usage_matrix,
+            x=hours,
+            y=days,
+            colorscale='Blues',
+            hoverongaps=False,
+            hovertemplate='%{y} %{x}时: %{z:.1f}小时<extra></extra>'
+        ))
+        
+        # 更新布局
+        fig.update_layout(
+            title='每周用眼时间分布',
+            xaxis_title='小时',
+            yaxis_title='星期',
+            xaxis=dict(
+                tickmode='array',
+                ticktext=[f'{i}:00' for i in range(24)],
+                tickvals=list(range(24))
+            )
+        )
+        
+        return fig.to_json()
+    
+    def analyze_eye_health(self, record):
+        """分析单条用眼健康记录，生成建议
+        
+        Args:
+            record: EyesightRecord对象
+            
+        Returns:
+            dict: 包含分析结果和建议的字典
+        """
+        analysis = {
+            'distance_status': 'normal',
+            'light_status': 'normal',
+            'blink_status': 'normal',
+            'suggestions': []
+        }
+        
+        # 分析视距
+        if record.screen_distance < self.distance_thresholds['too_close']:
+            analysis['distance_status'] = 'too_close'
+            analysis['suggestions'].append('您离屏幕/书本太近了，请保持35-45厘米的适当距离。')
+        elif record.screen_distance > self.distance_thresholds['too_far']:
+            analysis['distance_status'] = 'too_far'
+            analysis['suggestions'].append('您离屏幕/书本太远了，可以适当靠近一些。')
+            
+        # 分析光照
+        if record.ambient_light < self.light_thresholds['too_dark']:
+            analysis['light_status'] = 'too_dark'
+            analysis['suggestions'].append('当前环境光线不足，建议适当增加照明。')
+        elif record.ambient_light > self.light_thresholds['too_bright']:
+            analysis['light_status'] = 'too_bright'
+            analysis['suggestions'].append('当前环境光线过强，建议适当减弱照明或调整角度。')
+            
+        # 分析眨眼
+        if record.blink_rate < self.blink_thresholds['too_low']:
+            analysis['blink_status'] = 'too_low'
+            analysis['suggestions'].append('您的眨眼频率过低，请记得多眨眼，避免眼睛干涩。')
+        elif record.blink_rate > self.blink_thresholds['too_high']:
+            analysis['blink_status'] = 'too_high'
+            analysis['suggestions'].append('眨眼频率过高，可能表示眼疲劳，建议及时休息。')
+            
+        # 分析用眼时长
+        if record.usage_duration > 40 * 60 and not record.break_taken:  # 40分钟
+            analysis['suggestions'].append('您已连续用眼40分钟，建议遵循20-20-20法则：每20分钟看20英尺远处20秒。')
+            
+        return analysis
+    
+    def get_daily_report(self, date=None):
+        """生成每日用眼健康报告
+        
+        Args:
+            date: 指定日期，默认为今天
+            
+        Returns:
+            dict: 包含报告数据的字典
+        """
+        if date is None:
+            date = datetime.now().date()
+        
+        start_time = datetime.combine(date, datetime.min.time())
+        end_time = datetime.combine(date, datetime.max.time())
+        
+        records = self.db_manager.get_eyesight_stats(start_time, end_time)
+        if not records:
+            return None
+            
+        report = {
+            'date': date.strftime('%Y-%m-%d'),
+            'total_usage': sum(r.usage_duration for r in records) / 3600,  # 总用眼时间（小时）
+            'avg_distance': np.mean([r.screen_distance for r in records]),
+            'avg_light': np.mean([r.ambient_light for r in records]),
+            'avg_blink_rate': np.mean([r.blink_rate for r in records]),
+            'warning_count': sum(r.warning_count for r in records),
+            'break_count': sum(1 for r in records if r.break_taken),
+            'distance_violations': len([r for r in records if r.screen_distance < self.distance_thresholds['too_close']]),
+            'light_violations': len([r for r in records if r.ambient_light < self.light_thresholds['too_dark'] or 
+                                   r.ambient_light > self.light_thresholds['too_bright']]),
+            'suggestions': []
+        }
+        
+        # 生成综合建议
+        if report['total_usage'] > 4:
+            report['suggestions'].append('今日用眼时间较长，建议适当控制使用时间。')
+        if report['distance_violations'] > 5:
+            report['suggestions'].append('今日多次出现不良用眼距离，请注意保持正确距离。')
+        if report['light_violations'] > 5:
+            report['suggestions'].append('今日光照环境多次不合适，建议调整照明条件。')
+        if report['warning_count'] > 10:
+            report['suggestions'].append('今日收到较多警告，建议明天多注意用眼卫生。')
+        
+        return report
 
 # 创建全局视力保护管理器实例
 eyesight_protector = EyesightProtector()

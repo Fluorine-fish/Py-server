@@ -1,8 +1,46 @@
-# Serial Communication Web Server
+# 儿童智能台灯管理系统
 
-一个基于 Flask 的串口通信 Web 服务器，支持串口数据收发和历史记录管理，添加了对特定帧格式和提醒功能的支持。
+## 项目简介
 
-A Flask-based web server for serial communication that supports sending/receiving serial data, managing historical records, and handling specific frame formats with reminder features.
+这是一款基于视觉分析的儿童智能台灯管理系统的Web服务端。系统通过机械臂实现智能照明和姿势提醒功能，为儿童提供健康的学习环境，为家长提供全面的监控和管理功能。
+
+### 主要功能
+
+- 多关节姿势检测和分析
+- 用眼距离监测
+- 情绪识别和分析
+- 久坐提醒
+- 智能照明控制（3000-6500K）
+- 数据统计和分析
+
+## 系统要求
+
+- Python 3.9+
+- MySQL 5.7+
+- OpenCV兼容的摄像头
+- 串口设备（用于机械臂通信）
+
+## 快速开始
+
+### 安装
+
+1. 克隆仓库：
+```bash
+git clone [repository-url]
+cd Py-server
+```
+
+2. 创建虚拟环境：
+```bash
+conda env create -f environment.yml
+conda activate smart-lamp
+```
+
+3. 配置环境：
+```bash
+cp .env.example .env
+# 编辑 .env 文件配置数据库和设备参数
+```
 
 ## 功能特点 | Features
 
@@ -169,6 +207,152 @@ The following options can be configured in `config.py`:
 3. 实时更新：
    - 通过 Server-Sent Events (SSE) 技术实现前端数据实时更新
    - 可以通过界面上的"自动更新"按钮控制是否接收实时更新
+
+## API 接口 | API Interfaces
+
+### 1. 久坐提醒接口 | Sitting Reminder API
+
+```http
+GET /api/sitting/status
+```
+
+获取当前久坐状态，返回：
+```json
+{
+    "is_sitting": true,
+    "duration": 25.5,         // 当前持续久坐时间（分钟）
+    "last_movement": "2025-05-05T14:30:00Z",
+    "warning_count": 3,       // 今日提醒次数
+    "daily_stats": {
+        "total_sitting_time": 180,    // 总久坐时间（分钟）
+        "total_active_time": 45,      // 总活动时间（分钟）
+        "max_continuous_sitting": 45   // 最长持续久坐时间（分钟）
+    }
+}
+```
+
+```http
+POST /api/sitting/config
+Content-Type: application/json
+
+{
+    "threshold": 20,          // 久坐阈值（分钟）
+    "warning_interval": 5,    // 提醒间隔（分钟）
+    "base_intensity": 0.6,    // 基础提醒强度 (0.0-1.0)
+    "enabled": true          // 是否启用提醒
+}
+```
+
+### 2. 坐姿提醒接口 | Posture Reminder API
+
+```http
+GET /api/posture/status
+```
+
+获取当前坐姿状态，返回：
+```json
+{
+    "quality": "good",
+    "angles": {
+        "head": 15.5,
+        "neck": 12.3,
+        "shoulder": 5.2,
+        "spine": 8.7
+    },
+    "stability_scores": {
+        "head": 85.5,
+        "neck": 90.2,
+        "shoulder": 88.7,
+        "spine": 92.1
+    },
+    "issues": ["颈部前倾"],
+    "score": 87.5
+}
+```
+
+```http
+POST /api/posture/config
+Content-Type: application/json
+
+{
+    "thresholds": {
+        "head": 25.0,
+        "neck": 20.0,
+        "shoulder": 12.0,
+        "spine": 15.0
+    },
+    "weights": {
+        "head": 0.25,
+        "neck": 0.30,
+        "shoulder": 0.15,
+        "spine": 0.30
+    },
+    "enabled": true
+}
+```
+
+### 3. 语音交互接口 | Voice Interaction API
+
+```http
+POST /api/voice/control
+Content-Type: application/json
+
+{
+    "command": "string",     // start, stop, pause, resume
+    "volume": 80,           // 音量 (0-100)
+    "duration": 10,         // 持续时间（秒）
+    "parameters": {}        // 其他参数
+}
+```
+
+```http
+GET /api/voice/status
+```
+
+获取语音模块状态：
+```json
+{
+    "status": "active",     // active, stopped, paused
+    "volume": 80,
+    "last_command": "start",
+    "timestamp": "2025-05-05T14:30:00Z"
+}
+```
+
+### 4. 串口通信协议 | Serial Communication Protocol
+
+#### 帧格式 | Frame Format
+所有通信使用32字节的固定长度帧格式：
+```c
+typedef struct {
+    char start;        // 0 帧头 's'
+    char type;         // 1 消息类型
+    char data[29];     // 2-30 数据区域
+    char end;         // 31 帧尾 'e'
+} frame_t;
+```
+
+#### 消息类型 | Message Types
+- 0xA0: 控制指令 | Control command
+- 0xA1: 姿势矫正 | Posture correction
+- 0xA2: 久坐提醒 | Sitting reminder
+- 0xA3: 警报指令 | Alert command
+- 0xA4: 照明控制 | Light control
+- 0xA5: 语音控制 | Voice control
+- 0xB0: 状态反馈 | Status feedback
+
+#### 提醒类型 | Reminder Types
+- 0x00: 无提醒 | No reminder
+- 0x01: 久坐提醒 | Sitting reminder
+- 0x02: 坐姿提醒 | Posture reminder
+- 0x03: 语音交互 | Voice interaction
+
+#### 语音命令 | Voice Commands
+- 0x01: 开始交互 | Start interaction
+- 0x02: 停止交互 | Stop interaction
+- 0x03: 暂停交互 | Pause interaction
+- 0x04: 恢复交互 | Resume interaction
+- 0x05: 音量控制 | Volume control
 
 ## 故障排除 | Troubleshooting
 

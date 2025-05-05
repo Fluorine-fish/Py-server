@@ -247,9 +247,9 @@ class SittingMonitor:
         self.serial_handler = serial_handler
         
         # 久坐检测参数（针对儿童设置更短的时间）
-        self.sitting_threshold = 20  # 久坐阈值（分钟）
-        self.warning_interval = 5    # 提醒间隔（分钟）
-        self.break_duration = 3      # 建议休息时长（分钟）
+        self.sitting_threshold = 20     # 久坐阈值（分钟）
+        self.warning_interval = 5       # 提醒间隔（分钟）
+        self.break_duration = 3         # 建议休息时长（分钟）
         
         # 活动状态追踪
         self.last_movement_time = datetime.now()
@@ -257,16 +257,30 @@ class SittingMonitor:
         self.is_sitting = False
         self.continuous_sitting_duration = 0
         
-        # 活动检测阈值
-        self.movement_threshold = 0.2  # 移动检测阈值（弧度）
-        self.standing_threshold = 5.0  # 起立检测阈值（秒）
+        # 活动检测参数
+        self.movement_threshold = 0.2    # 移动检测阈值（弧度）
+        self.standing_threshold = 5.0    # 起立检测阈值（秒）
+        self.activity_intensity = 0.0    # 活动强度
+        
+        # 活动记录增强
+        self.activity_history = []
+        self.max_history_size = 1000
+        self.daily_stats = {
+            'total_sitting_time': 0,
+            'total_active_time': 0,
+            'warning_count': 0,
+            'movement_count': 0,
+            'max_continuous_sitting': 0
+        }
+        
+        # 自适应提醒强度参数
+        self.base_intensity = 0.6      # 基础提醒强度
+        self.max_intensity = 1.0       # 最大提醒强度
+        self.intensity_increment = 0.1  # 每次增加的强度
+        self.current_intensity = self.base_intensity
         
     def update_status(self, posture_data):
-        """更新活动状态
-        
-        Args:
-            posture_data: 包含姿势信息的字典
-        """
+        """更新活动状态"""
         current_time = datetime.now()
         
         # 检测是否有显著移动
@@ -274,16 +288,102 @@ class SittingMonitor:
             if not self.is_sitting:
                 self.last_movement_time = current_time
             self.is_sitting = True
+            self.activity_intensity = self._calculate_activity_intensity(posture_data)
             
+            # 记录活动
+            self._record_activity({
+                'timestamp': current_time,
+                'activity_type': 'sitting',
+                'intensity': self.activity_intensity,
+                'duration': self.continuous_sitting_duration,
+                'posture_data': posture_data
+            })
+        
         # 计算持续坐姿时间
         if self.is_sitting:
             self.continuous_sitting_duration = (current_time - self.last_movement_time).total_seconds() / 60
             
+            # 更新每日最长久坐时间
+            if self.continuous_sitting_duration > self.daily_stats['max_continuous_sitting']:
+                self.daily_stats['max_continuous_sitting'] = self.continuous_sitting_duration
+            
             # 检查是否需要发送久坐提醒
             if self._should_send_reminder():
-                self.send_sitting_reminder()
+                self._send_adaptive_reminder()
                 self.last_warning_time = current_time
+                self.daily_stats['warning_count'] += 1
+
+    def _calculate_activity_intensity(self, posture_data):
+        """计算活动强度"""
+        if not posture_data or not isinstance(posture_data, dict):
+            return 0.0
         
+        # 基于姿势变化计算活动强度
+        angles = posture_data.get('angles', {})
+        if not angles:
+            return 0.0
+        
+        # 计算所有角度变化的平均值
+        changes = []
+        for angle_name, angle in angles.items():
+            if angle is not None:
+                changes.append(abs(angle))
+        
+        if not changes:
+            return 0.0
+        
+        # 归一化活动强度到0-1范围
+        avg_change = sum(changes) / len(changes)
+        return min(1.0, avg_change / 45.0)  # 45度作为最大变化参考
+
+    def _send_adaptive_reminder(self):
+        """发送自适应强度的久坐提醒"""
+        try:
+            # 计算提醒强度
+            time_factor = min(self.continuous_sitting_duration / 60.0, 1.0)
+            intensity = self.current_intensity + (self.max_intensity - self.current_intensity) * time_factor
+            
+            # 发送提醒
+            success = self.serial_handler.send_sitting_reminder(int(self.continuous_sitting_duration))
+            
+            if success:
+                # 提醒成功，增加下次提醒强度
+                self.current_intensity = min(self.max_intensity, 
+                                          self.current_intensity + self.intensity_increment)
+                log_manager.info(f"发送久坐提醒成功：已持续静坐 {int(self.continuous_sitting_duration)} 分钟，"
+                               f"强度：{intensity:.2f}")
+            else:
+                log_manager.error("发送久坐提醒失败")
+                
+        except Exception as e:
+            log_manager.error(f"发送久坐提醒时出错: {str(e)}")
+
+    def _should_send_reminder(self):
+        """检查是否应该发送久坐提醒"""
+        if not self.is_sitting:
+            return False
+        
+        # 检查是否超过久坐阈值
+        if self.continuous_sitting_duration < self.sitting_threshold:
+            return False
+            
+        # 检查是否达到提醒间隔
+        time_since_last_warning = (datetime.now() - self.last_warning_time).total_seconds() / 60
+        
+        # 根据久坐时间动态调整提醒频率
+        if self.continuous_sitting_duration > 45:  # 超过45分钟
+            return time_since_last_warning >= (self.warning_interval * 0.5)  # 缩短提醒间隔
+        return time_since_last_warning >= self.warning_interval
+
+    def get_daily_stats(self):
+        """获取每日统计数据"""
+        return {
+            **self.daily_stats,
+            'current_sitting_duration': self.continuous_sitting_duration,
+            'current_intensity': self.activity_intensity,
+            'reminder_intensity': self.current_intensity
+        }
+
     def _detect_movement(self, posture_data):
         """检测是否有显著移动
         
@@ -302,19 +402,6 @@ class SittingMonitor:
         return (abs(head_angle) > self.movement_threshold or
                 abs(neck_angle) > self.movement_threshold or
                 abs(spine_angle) > self.movement_threshold)
-    
-    def _should_send_reminder(self):
-        """检查是否应该发送久坐提醒"""
-        if not self.is_sitting:
-            return False
-            
-        # 检查是否超过久坐阈值
-        if self.continuous_sitting_duration < self.sitting_threshold:
-            return False
-            
-        # 检查是否达到提醒间隔
-        time_since_last_warning = (datetime.now() - self.last_warning_time).total_seconds() / 60
-        return time_since_last_warning >= self.warning_interval
     
     def send_sitting_reminder(self):
         """发送久坐提醒"""

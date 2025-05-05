@@ -1065,3 +1065,46 @@ def reset_sitting_monitor():
         'status': 'success',
         'message': '久坐监控状态已重置'
     })
+
+from flask import jsonify
+from modules.eyesight_module import eyesight_protector
+
+# ...existing code...
+
+@app.route('/api/eyesight/light_radar', methods=['GET'])
+def get_light_radar_chart():
+    """获取光照环境雷达图数据"""
+    try:
+        chart_data = eyesight_protector.generate_light_radar_chart()
+        if not chart_data:
+            return jsonify({'error': '没有可用的光照数据'}), 404
+        return jsonify(chart_data)
+    except Exception as e:
+        app.logger.error(f'生成光照雷达图时出错: {str(e)}')
+        return jsonify({'error': '生成光照雷达图失败'}), 500
+
+@app.route('/api/eyesight/usage_heatmap', methods=['GET'])
+def get_usage_heatmap():
+    """获取用眼时间热力图数据"""
+    try:
+        heatmap_data = eyesight_protector.generate_usage_heatmap()
+        if not heatmap_data:
+            return jsonify({'error': '没有可用的用眼时间数据'}), 404
+        return jsonify(heatmap_data)
+    except Exception as e:
+        app.logger.error(f'生成用眼时间热力图时出错: {str(e)}')
+        return jsonify({'error': '生成用眼时间热力图失败'}), 500
+
+@app.route('/api/eyesight/report/daily', methods=['GET'])
+def get_daily_eye_report():
+    """获取每日用眼健康报告"""
+    try:
+        report = eyesight_protector.get_daily_report()
+        if not report:
+            return jsonify({'error': '没有可用的报告数据'}), 404
+        return jsonify(report)
+    except Exception as e:
+        app.logger.error(f'生成每日报告时出错: {str(e)}')
+        return jsonify({'error': '生成每日报告失败'}), 500
+
+# ...existing code...

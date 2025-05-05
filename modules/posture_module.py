@@ -325,7 +325,7 @@ class WebPostureMonitor:
             
         if POSTURE_MODULE_AVAILABLE:
             try:
-                print("正在初始化姿势分析和情绪分析组件...")
+                print("正在初始化姿势分析 安定情绪分析组件...")
                 
                 # 使用正确的MediaPipe姿势检测
                 self.pose = mp_pose.Pose(
@@ -630,7 +630,7 @@ class WebPostureMonitor:
         current_time = time.time()
         
         # 检查是否到达调整间隔
-        if not self.adaptive_resolution or (current_time - self.last_resolution_adjust_time) < RESOLUTION_ADJUST_INTERVAL:
+        if not self.adaptive_resolution or(current_time - self.last_resolution_adjust_time) < RESOLUTION_ADJUST_INTERVAL:
             return
             
         capture_fps = self.capture_fps.get_fps()
@@ -703,7 +703,7 @@ class WebPostureMonitor:
                 current_time = time.time()
                 
                 # 如果摄像头出现多次错误，尝试重新连接摄像头
-                if consecutive_read_failures > 5 and (current_time - self.performance_stats['last_reconnect_time']) > self.performance_stats['reconnect_interval']:
+                if consecutive_read_failures > 5 and(current_time - self.performance_stats['last_reconnect_time']) > self.performance_stats['reconnect_interval']:
                     print(f"连续 {consecutive_read_failures} 次读取失败，尝试重新初始化摄像头...")
                     self.cap.release()
                     success = self._init_camera()
@@ -800,7 +800,7 @@ class WebPostureMonitor:
                         )
                         self.current_posture_start = current_time
                 
-                # 每5秒保存一次情绪记录和专注度
+                # 每5秒保存一次情绪记录 and专注度
                 if current_time - self.last_save_time >= self.save_interval:
                     if emotion_results['emotion']:
                         save_emotion_record(
@@ -1241,6 +1241,20 @@ POSTURE_WEIGHTS = {
     'spine': 0.25     # 脊柱姿势权重
 }
 
+thresholds = {
+    'head': 30,
+    'neck': 35,
+    'shoulder': 15,
+    'spine': 20
+}
+
+joint_names = {
+    'head': '头部',
+    'neck': '颈部',
+    'shoulder': '肩部',
+    'spine': '脊柱'
+}
+
 class PostureDetector:
     """姿势检测器 - 处理实时姿势分析"""
     def __init__(self):
@@ -1267,10 +1281,10 @@ class PostureDetector:
         
         # 姿势历史记录
         self.angle_history = {
-            'head': deque(maxlen=10),
-            'neck': deque(maxlen=10),
-            'shoulder': deque(maxlen=10),
-            'spine': deque(maxlen=10)
+            'head': deque(maxlen=30),
+            'neck': deque(maxlen=30),
+            'shoulder': deque(maxlen=30),
+            'spine': deque(maxlen=30)
         }
         
         # 最后一次有效角度记录
@@ -1281,12 +1295,32 @@ class PostureDetector:
             'spine': None
         }
         
+        self.stability_window = []
+        self.window_size = 30  # Track last 30 frames
+        self.stability_threshold = 5  # Degrees of acceptable variation
+        self.stability_score = 100  # Initial score
+        self.results = {}
+
+    def analyze_stability(self, angle):
+        if angle is None:
+            return
+            
+        self.stability_window.append(angle)
+        if len(self.stability_window) > self.window_size:
+            self.stability_window.pop(0)
+            
+        if len(self.stability_window) >= 5:  # Minimum samples needed
+            variation = max(self.stability_window) - min(self.stability_window)
+            
+            # Update stability score
+            if variation > self.stability_threshold:
+                penalty = min(20, variation - self.stability_threshold)
+                self.stability_score = max(0, self.stability_score - penalty)
+            else:
+                self.stability_score = min(100, self.stability_score + 1)
+
     def evaluate_posture(self, landmarks):
-        """综合评估姿势质量，使用多关节数据
-        
-        Returns:
-            dict: 包含各项评估指标和总体评分
-        """
+        """综合评估姿势质量，使用多关节数据"""
         if not landmarks:
             return {
                 'quality': 'unknown',
@@ -1303,87 +1337,60 @@ class PostureDetector:
             'spine': calculate_spine_angle(landmarks)
         }
         
-        # 更新角度历史记录
+        # 更新角度历史记录和评估稳定性
+        issues = []
+        joint_scores = {}
+        
         for joint, angle in angles.items():
             if angle is not None:
                 self.angle_history[joint].append(angle)
                 self.last_angles[joint] = angle
-        
-        # 初始化评估结果
-        issues = []
-        joint_scores = {}
-        
-        # 评估每个关节的状态
-        thresholds = {
-            'head': self.head_angle_threshold,
-            'neck': self.neck_tilt_threshold,
-            'shoulder': self.shoulder_tilt_threshold,
-            'spine': self.spine_tilt_threshold
-        }
-        
-        joint_names = {
-            'head': '头部',
-            'neck': '颈部',
-            'shoulder': '肩部',
-            'spine': '脊柱'
-        }
-        
-        # 计算每个关节的得分
-        for joint, angle in angles.items():
-            if angle is None:
+                
+                # 评估稳定性
+                if len(self.angle_history[joint]) >= 5:
+                    recent_angles = list(self.angle_history[joint])[-5:]
+                    variation = np.std(recent_angles)
+                    stability_score = np.exp(-variation / 10)  # 指数衰减评分
+                    
+                    # 使用sigmoid函数计算基础分数
+                    threshold = thresholds[joint]
+                    deviation = abs(angle)
+                    base_score = 100 / (1 + np.exp((deviation - threshold) / 5))
+                    
+                    # 综合评分（70%基础分数 + 30%稳定性）
+                    final_joint_score = 0.7 * base_score + 30 * stability_score
+                    
+                    if variation > 4:
+                        issues.append(f"{joint_names[joint]}姿势不稳定")
+                    if deviation > threshold:
+                        issues.append(f"{joint_names[joint]}角度过大 ({deviation:.1f}°)")
+                        
+                    joint_scores[joint] = max(0, min(100, final_joint_score))
+            else:
                 joint_scores[joint] = 0
-                continue
-            
-            threshold = thresholds[joint]
-            deviation = abs(angle)
-            
-            # 计算基础得分（100分为基准）
-            base_score = 100
-            if deviation > threshold:
-                # 根据超出阈值的程度扣分
-                penalty = min(100, (deviation - threshold) * 2)
-                base_score -= penalty
-                issues.append(f"{joint_names[joint]}倾斜过大 ({deviation:.1f}°)")
-            
-            # 计算稳定性得分
-            if len(self.angle_history[joint]) >= 3:
-                recent_angles = list(self.angle_history[joint])[-3:]
-                variation = np.std(recent_angles)
-                if variation > 5:  # 如果变化太大，说明姿势不稳定
-                    stability_penalty = min(20, variation)
-                    base_score -= stability_penalty
-                    issues.append(f"{joint_names[joint]}姿势不稳定")
-            
-            joint_scores[joint] = max(0, base_score)
         
-        # 计算加权总分
-        final_score = sum(
-            score * POSTURE_WEIGHTS[joint]
-            for joint, score in joint_scores.items()
-        ) / sum(
-            POSTURE_WEIGHTS[joint]
-            for joint in joint_scores
-            if joint_scores[joint] > 0
-        )
-        
-        # 确定总体质量等级
-        if final_score >= 90:
-            quality = 'good'
-        elif final_score >= 75:
-            quality = 'slightly_bad'
-        elif final_score >= 60:
-            quality = 'bad'
+        # 计算总分
+        weights_sum = sum(POSTURE_WEIGHTS[joint] for joint in joint_scores if joint_scores[joint] > 0)
+        if weights_sum > 0:
+            final_score = sum(score * POSTURE_WEIGHTS[joint] for joint, score in joint_scores.items()) / weights_sum
         else:
-            quality = 'severe'
+            final_score = 0
+        
+        # 确定质量等级
+        if final_score >= 90: quality = 'excellent'
+        elif final_score >= 80: quality = 'good'
+        elif final_score >= 70: quality = 'fair'
+        elif final_score >= 60: quality = 'poor'
+        else: quality = 'severe'
         
         return {
             'quality': quality,
             'angles': angles,
             'joint_scores': joint_scores,
-            'score': final_score,
+            'score': round(final_score, 1),
             'issues': issues
         }
-    
+        
     def detect_posture(self, frame):
         """分析单帧图像中的姿势"""
         try:
@@ -1453,3 +1460,120 @@ class PostureDetector:
         else:
             self.clear_counter = min(self.clear_counter + 1, CLEAR_FRAMES_THRESHOLD)
             self.occlusion_counter = max(0, self.occlusion_counter - 1)
+
+    def calculate_stability(self, angles, history_window=10):
+        """计算姿势稳定性评分，增加动态评分机制
+        
+        Args:
+            angles: 各关节角度字典
+            history_window: 历史窗口大小
+        
+        Returns:
+            tuple: (scores, metrics)
+            - scores: 每个关节的稳定性得分(0-100)
+            - metrics: 每个关节的详细指标数据
+        """
+        scores = {}
+        metrics = {}
+        
+        for joint, angle in angles.items():
+            if angle is not None:
+                history = list(self.angle_history[joint])[-history_window:]
+                if len(history) >= 3:
+                    # 计算基础统计指标
+                    std_dev = np.std(history)
+                    mean_angle = np.mean(history)
+                    max_deviation = max(abs(x - mean_angle) for x in history)
+                    
+                    # 计算移动变化率
+                    changes = np.diff(history)
+                    avg_change_rate = np.mean(np.abs(changes))
+                    
+                    # 检测快速变化
+                    rapid_changes = sum(1 for change in changes if abs(change) > 5)
+                    
+                    # 计算趋势稳定性（使用简单线性回归）
+                    x = np.arange(len(history))
+                    z = np.polyfit(x, history, 1)
+                    trend_slope = abs(z[0])  # 斜率的绝对值表示变化趋势
+                    
+                    # 动态权重计算
+                    deviation_weight = 0.35
+                    change_weight = 0.3
+                    trend_weight = 0.35
+                    
+                    # 根据历史数据长度调整权重
+                    if len(history) < 5:
+                        deviation_weight = 0.5
+                        change_weight = 0.3
+                        trend_weight = 0.2
+                    
+                    # 计算各个评分组件
+                    stability_score = 100 * np.exp(-std_dev / (thresholds[joint] * 0.2))
+                    change_score = 100 * np.exp(-avg_change_rate / 3)
+                    trend_score = 100 * np.exp(-trend_slope * 5)
+                    
+                    # 合并评分
+                    final_score = (
+                        stability_score * deviation_weight +
+                        change_score * change_weight +
+                        trend_score * trend_weight
+                    )
+                    
+                    # 如果检测到剧烈变化，额外惩罚
+                    if rapid_changes > 0:
+                        penalty = min(30, rapid_changes * 10)
+                        final_score = max(0, final_score - penalty)
+                    
+                    scores[joint] = round(final_score, 1)
+                    metrics[joint] = {
+                        'std_dev': round(std_dev, 2),
+                        'mean_angle': round(mean_angle, 2),
+                        'max_deviation': round(max_deviation, 2),
+                        'avg_change_rate': round(avg_change_rate, 2),
+                        'rapid_changes': rapid_changes,
+                        'trend_slope': round(trend_slope, 4),
+                        'stability_component': round(stability_score, 1),
+                        'change_component': round(change_score, 1),
+                        'trend_component': round(trend_score, 1),
+                        'window_size': len(history)
+                    }
+                
+                # 对于数据量不足的情况，给出基础评分
+                else:
+                    scores[joint] = 50.0  # 基础评分
+                    metrics[joint] = {
+                        'std_dev': 0,
+                        'mean_angle': angle,
+                        'max_deviation': 0,
+                        'avg_change_rate': 0,
+                        'rapid_changes': 0,
+                        'trend_slope': 0,
+                        'window_size': len(history)
+                    }
+        
+        return scores, metrics
+
+    def process_frame(self, frame):
+        # ...existing code...
+        if angle is not None and valid_detection and not final_occlusion:
+            self.analyze_stability(angle)
+            # Add stability info to results
+            self.results['stability_score'] = self.stability_score
+            self.results['is_stable'] = self.stability_score > 80
+        return self.results
+
+# 更新姿势评估阈值常量和权重
+HEAD_ANGLE_THRESHOLD = 25.0     # 降低头部角度阈值，更适合儿童（原30.0）
+SHOULDER_TILT_THRESHOLD = 12.0  # 降低肩部倾斜角度阈值（原15.0）
+SPINE_TILT_THRESHOLD = 15.0     # 降低脊柱倾斜角度阈值（原20.0）
+NECK_TILT_THRESHOLD = 20.0      # 降低颈部倾斜角度阈值（原25.0）
+HIP_SHOULDER_THRESHOLD = 20.0    # 降低臀部-肩部角度阈值（原25.0）
+
+# 优化姿势评分权重，增加颈部和脊柱的权重
+POSTURE_WEIGHTS = {
+    'head': 0.25,     # 降低头部权重（原0.3）
+    'neck': 0.30,     # 增加颈部权重（原0.25）
+    'shoulder': 0.15, # 降低肩部权重（原0.2）
+    'spine': 0.30     # 增加脊柱权重（原0.25）
+}
