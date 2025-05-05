@@ -3,125 +3,134 @@
 ## 系统要求
 
 ### 硬件要求
-- USB摄像头
-- 串口设备（机械臂）
-- 处理器：建议Intel i5或更高
-- 内存：最少4GB RAM
-- 存储空间：至少1GB可用空间
+- 摄像头（支持USB接口）
+- 串口设备（支持USB转串口）
+- 处理器：推荐Intel i5或更高
+- 内存：至少4GB RAM
+- 存储：至少100MB可用空间
 
 ### 软件要求
-- Python 3.8或更高版本
-- OpenCV 4.x
-- SQLite 3
-- 网络浏览器（Chrome/Firefox/Edge最新版本）
+- Python 3.9+
+- MySQL数据库
+- OpenCV支持
+- 串口驱动程序
 
 ## 安装步骤
 
-### 1. Python环境配置
+### 1. 获取源代码
 
-#### 使用Conda（推荐）
 ```bash
-# 创建新的conda环境
-conda env create -f environment.yml
-# 激活环境
-conda activate py-server
+git clone <repository-url>
+cd Py-server
 ```
 
-#### 使用pip
+### 2. 创建虚拟环境
+
+使用Conda（推荐）:
 ```bash
-# 创建虚拟环境
+conda env create -f environment.yml
+conda activate pyserver
+```
+
+或使用pip:
+```bash
 python -m venv venv
-# 激活虚拟环境
-source venv/bin/activate  # Linux/macOS
-venv\Scripts\activate     # Windows
-# 安装依赖
+source venv/bin/activate  # Linux/Mac
 pip install -r requirements.txt
 ```
 
-### 2. 数据库配置
-```bash
-# 初始化数据库
-python db_handler.py --init
-```
+### 3. 配置串口权限
 
-### 3. 设备权限配置
+Linux系统需要配置串口访问权限：
 
-#### Linux系统
+1. 添加当前用户到dialout组：
 ```bash
-# 添加当前用户到dialout组（用于串口访问）
 sudo usermod -a -G dialout $USER
-# 添加当前用户到video组（用于摄像头访问）
-sudo usermod -a -G video $USER
-# 配置USB设备权限
-sudo cp config/99-usb-serial.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules
 ```
 
-#### Windows系统
-- 确保安装正确的USB串口驱动
-- 在设备管理器中检查串口号
-
-### 4. 配置文件设置
-
-1. 复制示例配置文件
+2. 创建udev规则：
 ```bash
-cp config.py.example config.py
+sudo nano /etc/udev/rules.d/50-serial.rules
 ```
 
-2. 修改配置文件
+添加以下内容：
+```
+KERNEL=="ttyUSB[0-9]*",MODE="0666"
+KERNEL=="ttyACM[0-9]*",MODE="0666"
+```
+
+3. 重载udev规则：
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+### 4. 配置数据库
+
+1. 安装MySQL：
+```bash
+sudo apt-get install mysql-server  # Ubuntu/Debian
+```
+
+2. 创建数据库和用户：
+```sql
+CREATE DATABASE serial_data;
+CREATE USER 'serial_user'@'localhost' IDENTIFIED BY 'Serial123!';
+GRANT ALL PRIVILEGES ON serial_data.* TO 'serial_user'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+### 5. 配置系统
+
+1. 复制配置模板：
+```bash
+cp config.example.py config.py
+```
+
+2. 修改配置文件：
 - 设置串口参数
-- 配置摄像头参数
+- 配置数据库连接
 - 调整系统参数
 
 ## 启动系统
 
-1. 启动服务器
+1. 启动服务器：
 ```bash
-python app.py
+python server.py
 ```
 
-2. 访问Web界面
-打开浏览器访问：http://localhost:5000
+2. 访问Web界面：
+   打开浏览器访问 http://127.0.0.1:5000
 
 ## 常见问题
 
-### 串口连接问题
-1. 检查设备管理器中的串口号
-2. 确认串口权限设置
-3. 验证波特率设置
+### 串口权限问题
+```bash
+sudo chmod 666 /dev/ttyUSB0  # 临时解决方案
+```
 
-### 摄像头问题
-1. 确认摄像头已正确连接
-2. 检查设备权限
-3. 验证摄像头编号设置
+### 数据库连接失败
+- 检查MySQL服务是否运行
+- 验证数据库用户名和密码
+- 确认数据库名称正确
 
-### 数据库问题
-1. 确认数据库文件权限
-2. 检查磁盘空间
-3. 验证数据库连接设置
+### 摄像头访问失败
+- 检查摄像头连接
+- 确认设备权限
+- 验证OpenCV安装
 
 ## 更新说明
 
-### 更新Python包
+定期检查并更新依赖：
 ```bash
-# 使用conda
-conda env update -f environment.yml
-
-# 使用pip
-pip install -r requirements.txt --upgrade
-```
-
-### 数据库迁移
-```bash
-python db_handler.py --migrate
+conda env update -f environment.yml  # 使用Conda
+# 或
+pip install -r requirements.txt --upgrade  # 使用pip
 ```
 
 ## 卸载说明
 
-1. 停止所有运行的服务
-2. 删除环境（可选）
-```bash
-conda remove --name py-server --all  # 如果使用conda
-rm -rf venv                         # 如果使用venv
-```
-3. 删除项目文件夹
+1. 停止所有服务
+2. 删除虚拟环境
+3. 删除项目文件
+4. 清理数据库（可选）

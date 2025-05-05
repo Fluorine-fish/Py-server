@@ -1,5 +1,5 @@
 """
-姿势分析模块 - 提供姿势和表情分析功能
+姿势分析模块 - 提供姿势和表情分析功能，支持多关节综合分析
 """
 import os
 import sys
@@ -8,6 +8,7 @@ import time
 import threading
 import queue
 import uuid
+import numpy as np
 from collections import deque
 from config import DB_CONFIG
 from modules.database_module import save_posture_record, save_emotion_record, save_focus_record
@@ -50,6 +51,80 @@ except ImportError as e:
     OCCLUSION_FRAMES_THRESHOLD = 10
     CLEAR_FRAMES_THRESHOLD = 5
     HEAD_ANGLE_THRESHOLD = 45
+
+# 添加姿势评估阈值常量
+SHOULDER_TILT_THRESHOLD = 15.0    # 肩部倾斜角度阈值
+SPINE_TILT_THRESHOLD = 20.0       # 脊柱倾斜角度阈值
+NECK_TILT_THRESHOLD = 30.0        # 颈部倾斜角度阈值
+HIP_SHOULDER_THRESHOLD = 25.0     # 臀部-肩部角度阈值
+
+def calculate_angle_between_points(p1, p2, p3):
+    """计算三点之间的角度"""
+    if not all([p1, p2, p3]):
+        return None
+    
+    v1 = np.array([p1.x - p2.x, p1.y - p2.y])
+    v2 = np.array([p3.x - p2.x, p3.y - p2.y])
+    
+    cosine = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+    angle = np.arccos(np.clip(cosine, -1.0, 1.0))
+    return np.degrees(angle)
+
+def calculate_spine_angle(landmarks):
+    """计算脊柱倾斜角度"""
+    if not landmarks:
+        return None
+    
+    # 使用髋关节中点和肩关节中点计算脊柱角度
+    left_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP]
+    right_hip = landmarks[mp_pose.PoseLandmark.RIGHT_HIP]
+    left_shoulder = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER]
+    right_shoulder = landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER]
+    
+    hip_mid = np.array([(left_hip.x + right_hip.x) / 2, (left_hip.y + right_hip.y) / 2])
+    shoulder_mid = np.array([(left_shoulder.x + right_shoulder.x) / 2, 
+                            (left_shoulder.y + right_shoulder.y) / 2])
+    
+    # 计算与垂直线的夹角
+    vertical = np.array([0, -1])
+    spine_vector = shoulder_mid - hip_mid
+    
+    cosine = np.dot(spine_vector, vertical) / (np.linalg.norm(spine_vector) * np.linalg.norm(vertical))
+    angle = np.arccos(np.clip(cosine, -1.0, 1.0))
+    return np.degrees(angle)
+
+def calculate_shoulder_tilt(landmarks):
+    """计算肩部倾斜角度"""
+    if not landmarks:
+        return None
+    
+    left_shoulder = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER]
+    right_shoulder = landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER]
+    
+    # 计算与水平线的夹角
+    dx = right_shoulder.x - left_shoulder.x
+    dy = right_shoulder.y - left_shoulder.y
+    angle = np.arctan2(dy, dx)
+    return np.degrees(angle)
+
+def calculate_neck_angle(landmarks):
+    """计算颈部角度"""
+    if not landmarks:
+        return None
+    
+    nose = landmarks[mp_pose.PoseLandmark.NOSE]
+    left_shoulder = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER]
+    right_shoulder = landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER]
+    
+    # 使用鼻子和肩部中点计算颈部角度
+    shoulder_mid_x = (left_shoulder.x + right_shoulder.x) / 2
+    shoulder_mid_y = (left_shoulder.y + right_shoulder.y) / 2
+    
+    # 计算与垂直线的夹角
+    dx = nose.x - shoulder_mid_x
+    dy = nose.y - shoulder_mid_y
+    angle = np.arctan2(dx, -dy)  # 使用-dy使角度符合人体工程学定义
+    return np.degrees(angle)
 
 # 全局参数设置
 posture_params = {
@@ -555,7 +630,7 @@ class WebPostureMonitor:
         current_time = time.time()
         
         # 检查是否到达调整间隔
-        if not self.adaptive_resolution或 (current_time - self.last_resolution_adjust_time) < RESOLUTION_ADJUST_INTERVAL:
+        if not self.adaptive_resolution or (current_time - self.last_resolution_adjust_time) < RESOLUTION_ADJUST_INTERVAL:
             return
             
         capture_fps = self.capture_fps.get_fps()
@@ -639,7 +714,7 @@ class WebPostureMonitor:
                     consecutive_read_failures = 0
                     self.performance_stats['last_reconnect_time'] = current_time
                 
-                # 使用分离的grab和retrieve方法提高性能
+                # 使用分离的grab andretrieve方法提高性能
                 if self.use_separate_grab_retrieve:
                     grabbed = self.cap.grab()
                     if not grabbed:
@@ -1151,6 +1226,21 @@ class WebPostureMonitor:
             self.total_bad_posture_time = 0
             self.posture_change_count = 0
 
+# 更新姿势评估阈值常量
+HEAD_ANGLE_THRESHOLD = 30.0     # 头部角度阈值（度）
+SHOULDER_TILT_THRESHOLD = 15.0  # 肩部倾斜角度阈值（度）
+SPINE_TILT_THRESHOLD = 20.0     # 脊柱倾斜角度阈值（度）
+NECK_TILT_THRESHOLD = 25.0      # 颈部倾斜角度阈值（度）
+HIP_SHOULDER_THRESHOLD = 25.0    # 臀部-肩部角度阈值（度）
+
+# 姿势评分权重
+POSTURE_WEIGHTS = {
+    'head': 0.3,      # 头部姿势权重
+    'neck': 0.25,     # 颈部姿势权重
+    'shoulder': 0.2,  # 肩部姿势权重
+    'spine': 0.25     # 脊柱姿势权重
+}
+
 class PostureDetector:
     """姿势检测器 - 处理实时姿势分析"""
     def __init__(self):
@@ -1163,98 +1253,197 @@ class PostureDetector:
             min_tracking_confidence=0.5
         )
         
-        # 初始化状态参数
+        # 状态参数
         self.last_valid_angle = None
         self.occlusion_counter = 0
         self.clear_counter = 0
         
         # 姿势阈值设置
-        self.head_angle_threshold = HEAD_ANGLE_THRESHOLD  # 头部角度阈值
-        self.visibility_threshold = VISIBILITY_THRESHOLD  # 可见性阈值
+        self.head_angle_threshold = HEAD_ANGLE_THRESHOLD
+        self.shoulder_tilt_threshold = SHOULDER_TILT_THRESHOLD
+        self.spine_tilt_threshold = SPINE_TILT_THRESHOLD
+        self.neck_tilt_threshold = NECK_TILT_THRESHOLD
+        self.hip_shoulder_threshold = HIP_SHOULDER_THRESHOLD
         
-    def detect_posture(self, frame):
-        """分析单帧图像中的姿势
+        # 姿势历史记录
+        self.angle_history = {
+            'head': deque(maxlen=10),
+            'neck': deque(maxlen=10),
+            'shoulder': deque(maxlen=10),
+            'spine': deque(maxlen=10)
+        }
         
-        Args:
-            frame: OpenCV BGR格式的图像帧
-            
+        # 最后一次有效角度记录
+        self.last_angles = {
+            'head': None,
+            'neck': None,
+            'shoulder': None,
+            'spine': None
+        }
+        
+    def evaluate_posture(self, landmarks):
+        """综合评估姿势质量，使用多关节数据
+        
         Returns:
-            字典包含以下信息：
-            - quality: 姿势质量 ('good', 'slightly_bad', 'bad', 'severe')
-            - angle: 头部角度
-            - is_occluded: 是否被遮挡
-            - landmarks: 姿势关键点
+            dict: 包含各项评估指标和总体评分
         """
+        if not landmarks:
+            return {
+                'quality': 'unknown',
+                'angles': self.last_angles,
+                'score': 0,
+                'issues': ['未检测到关键点']
+            }
+        
+        # 计算各个关节角度
+        angles = {
+            'head': calculate_head_angle(landmarks, None)[0],
+            'neck': calculate_neck_angle(landmarks),
+            'shoulder': calculate_shoulder_tilt(landmarks),
+            'spine': calculate_spine_angle(landmarks)
+        }
+        
+        # 更新角度历史记录
+        for joint, angle in angles.items():
+            if angle is not None:
+                self.angle_history[joint].append(angle)
+                self.last_angles[joint] = angle
+        
+        # 初始化评估结果
+        issues = []
+        joint_scores = {}
+        
+        # 评估每个关节的状态
+        thresholds = {
+            'head': self.head_angle_threshold,
+            'neck': self.neck_tilt_threshold,
+            'shoulder': self.shoulder_tilt_threshold,
+            'spine': self.spine_tilt_threshold
+        }
+        
+        joint_names = {
+            'head': '头部',
+            'neck': '颈部',
+            'shoulder': '肩部',
+            'spine': '脊柱'
+        }
+        
+        # 计算每个关节的得分
+        for joint, angle in angles.items():
+            if angle is None:
+                joint_scores[joint] = 0
+                continue
+            
+            threshold = thresholds[joint]
+            deviation = abs(angle)
+            
+            # 计算基础得分（100分为基准）
+            base_score = 100
+            if deviation > threshold:
+                # 根据超出阈值的程度扣分
+                penalty = min(100, (deviation - threshold) * 2)
+                base_score -= penalty
+                issues.append(f"{joint_names[joint]}倾斜过大 ({deviation:.1f}°)")
+            
+            # 计算稳定性得分
+            if len(self.angle_history[joint]) >= 3:
+                recent_angles = list(self.angle_history[joint])[-3:]
+                variation = np.std(recent_angles)
+                if variation > 5:  # 如果变化太大，说明姿势不稳定
+                    stability_penalty = min(20, variation)
+                    base_score -= stability_penalty
+                    issues.append(f"{joint_names[joint]}姿势不稳定")
+            
+            joint_scores[joint] = max(0, base_score)
+        
+        # 计算加权总分
+        final_score = sum(
+            score * POSTURE_WEIGHTS[joint]
+            for joint, score in joint_scores.items()
+        ) / sum(
+            POSTURE_WEIGHTS[joint]
+            for joint in joint_scores
+            if joint_scores[joint] > 0
+        )
+        
+        # 确定总体质量等级
+        if final_score >= 90:
+            quality = 'good'
+        elif final_score >= 75:
+            quality = 'slightly_bad'
+        elif final_score >= 60:
+            quality = 'bad'
+        else:
+            quality = 'severe'
+        
+        return {
+            'quality': quality,
+            'angles': angles,
+            'joint_scores': joint_scores,
+            'score': final_score,
+            'issues': issues
+        }
+    
+    def detect_posture(self, frame):
+        """分析单帧图像中的姿势"""
         try:
-            # 转换为RGB格式处理
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             pose_results = self.pose.process(frame_rgb)
             
             if not pose_results.pose_landmarks:
                 return {
                     'quality': 'unknown',
-                    'angle': None,
+                    'angles': self.last_angles,
                     'is_occluded': True,
-                    'landmarks': None
+                    'score': 0,
+                    'issues': ['未检测到人体关键点']
                 }
             
             # 检测遮挡
             is_occluded, _ = check_occlusion(pose_results.pose_landmarks.landmark)
             self._update_occlusion_counters(is_occluded)
-            
-            # 确定最终遮挡状态
             final_occlusion = self.occlusion_counter >= OCCLUSION_FRAMES_THRESHOLD
-            valid_detection = self.clear_counter >= CLEAR_FRAMES_THRESHOLD
             
-            # 计算头部角度
-            angle_info = calculate_head_angle(pose_results.pose_landmarks.landmark, frame.shape)
-            
-            if angle_info[0] is not None:
-                angle, is_bad_posture, _ = angle_info
-                self.last_valid_angle = angle
-                
-                # 确定姿势质量
-                if is_bad_posture:
-                    if angle > self.head_angle_threshold * 1.5:
-                        quality = 'severe'
-                    elif angle > self.head_angle_threshold * 1.2:
-                        quality = 'bad'
-                    else:
-                        quality = 'slightly_bad'
-                else:
-                    quality = 'good'
-                    
-                return {
-                    'quality': quality,
-                    'angle': angle,
-                    'is_occluded': False,
-                    'landmarks': pose_results.pose_landmarks
-                }
-            
-            # 如果当前帧检测失败但有上一次的有效角度
-            if final_occlusion and self.last_valid_angle:
+            if final_occlusion:
                 return {
                     'quality': 'unknown',
-                    'angle': self.last_valid_angle,
+                    'angles': self.last_angles,
                     'is_occluded': True,
-                    'landmarks': None
+                    'score': 0,
+                    'issues': ['人体关键点被遮挡']
                 }
             
-            return {
-                'quality': 'unknown',
-                'angle': None,
-                'is_occluded': True,
-                'landmarks': None
-            }
+            # 进行综合姿势评估
+            posture_evaluation = self.evaluate_posture(pose_results.pose_landmarks.landmark)
+            posture_evaluation['is_occluded'] = False
+            
+            return posture_evaluation
             
         except Exception as e:
             print(f"姿势检测异常: {str(e)}")
             return {
                 'quality': 'error',
-                'angle': None,
+                'angles': self.last_angles,
                 'is_occluded': True,
-                'landmarks': None
+                'score': 0,
+                'issues': [f'检测出错: {str(e)}']
             }
+            
+    def reconfigure(self, head_angle_threshold=None, shoulder_tilt_threshold=None,
+                   spine_tilt_threshold=None, neck_tilt_threshold=None,
+                   weights=None):
+        """重新配置检测器参数"""
+        if head_angle_threshold is not None:
+            self.head_angle_threshold = head_angle_threshold
+        if shoulder_tilt_threshold is not None:
+            self.shoulder_tilt_threshold = shoulder_tilt_threshold
+        if spine_tilt_threshold is not None:
+            self.spine_tilt_threshold = spine_tilt_threshold
+        if neck_tilt_threshold is not None:
+            self.neck_tilt_threshold = neck_tilt_threshold
+        if weights is not None:
+            global POSTURE_WEIGHTS
+            POSTURE_WEIGHTS.update(weights)
             
     def _update_occlusion_counters(self, is_occluded):
         """更新遮挡状态计数器"""
@@ -1264,15 +1453,3 @@ class PostureDetector:
         else:
             self.clear_counter = min(self.clear_counter + 1, CLEAR_FRAMES_THRESHOLD)
             self.occlusion_counter = max(0, self.occlusion_counter - 1)
-            
-    def reconfigure(self, head_angle_threshold=None, visibility_threshold=None):
-        """重新配置检测器参数
-        
-        Args:
-            head_angle_threshold: 新的头部角度阈值
-            visibility_threshold: 新的可见性阈值
-        """
-        if head_angle_threshold is not None:
-            self.head_angle_threshold = head_angle_threshold
-        if visibility_threshold is not None:
-            self.visibility_threshold = visibility_threshold

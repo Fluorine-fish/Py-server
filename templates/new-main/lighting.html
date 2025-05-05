@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>照明控制</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/new-ui/base.css">
+    <style>
+        .light-control-panel {
+            background: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 10px 0;
+        }
+
+        .slider {
+            flex: 1;
+            -webkit-appearance: none;
+            height: 8px;
+            border-radius: 4px;
+            background: #ddd;
+            outline: none;
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            cursor: pointer;
+        }
+
+        .value-display {
+            min-width: 60px;
+            text-align: right;
+            font-weight: bold;
+        }
+
+        .mode-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .mode-button {
+            padding: 10px;
+            border: 2px solid var(--primary-color);
+            border-radius: 4px;
+            background: transparent;
+            color: var(--primary-color);
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+        }
+
+        .mode-button.active {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .light-preview {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            margin: 20px auto;
+            background: #FFD700;
+            box-shadow: 0 0 20px #FFD700;
+            transition: all 0.3s;
+        }
+
+        .apply-button {
+            width: 100%;
+            padding: 12px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 20px;
+        }
+
+        .apply-button:hover {
+            background: var(--primary-color-dark);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>照明控制</h1>
+        
+        <div class="light-control-panel">
+            <div class="light-preview" id="lightPreview"></div>
+            
+            <div class="control-group">
+                <h3>亮度控制</h3>
+                <div class="slider-container">
+                    <input type="range" class="slider" id="brightnessSlider" 
+                           min="0" max="100" value="50" step="1">
+                    <span class="value-display" id="brightnessValue">50%</span>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <h3>色温控制</h3>
+                <div class="slider-container">
+                    <input type="range" class="slider" id="colorTempSlider" 
+                           min="2700" max="6500" value="4000" step="100">
+                    <span class="value-display" id="colorTempValue">4000K</span>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <h3>照明模式</h3>
+                <div class="mode-buttons">
+                    <button class="mode-button active" data-mode="0">手动模式</button>
+                    <button class="mode-button" data-mode="1">自动模式</button>
+                    <button class="mode-button" data-mode="2">阅读模式</button>
+                    <button class="mode-button" data-mode="3">休息模式</button>
+                </div>
+            </div>
+            
+            <button class="apply-button" id="applyButton">应用设置</button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const brightnessSlider = document.getElementById('brightnessSlider');
+            const colorTempSlider = document.getElementById('colorTempSlider');
+            const brightnessValue = document.getElementById('brightnessValue');
+            const colorTempValue = document.getElementById('colorTempValue');
+            const lightPreview = document.getElementById('lightPreview');
+            const modeButtons = document.querySelectorAll('.mode-button');
+            const applyButton = document.getElementById('applyButton');
+            
+            let currentMode = 0;
+            
+            // 更新显示值和预览
+            function updateDisplay() {
+                brightnessValue.textContent = `${brightnessSlider.value}%`;
+                colorTempValue.textContent = `${colorTempSlider.value}K`;
+                
+                // 更新预览效果
+                const brightness = brightnessSlider.value / 100;
+                const colorTemp = (colorTempSlider.value - 2700) / (6500 - 2700);
+                
+                // 使用色温值计算RGB
+                const r = Math.round(255 * (1 - colorTemp * 0.5));
+                const g = Math.round(255 * (0.8 + colorTemp * 0.2));
+                const b = Math.round(255 * colorTemp);
+                
+                // 应用亮度
+                const color = `rgba(${r}, ${g}, ${b}, ${brightness})`;
+                const shadow = `0 0 ${20 + brightness * 30}px rgba(${r}, ${g}, ${b}, ${brightness})`;
+                
+                lightPreview.style.background = color;
+                lightPreview.style.boxShadow = shadow;
+            }
+            
+            // 模式切换
+            modeButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    modeButtons.forEach(btn => btn.classList.remove('active'));
+                    this.classList.add('active');
+                    currentMode = parseInt(this.dataset.mode);
+                    
+                    // 在自动模式下禁用滑块
+                    const isAutoMode = currentMode === 1;
+                    brightnessSlider.disabled = isAutoMode;
+                    colorTempSlider.disabled = isAutoMode;
+                });
+            });
+            
+            // 应用设置
+            applyButton.addEventListener('click', function() {
+                const settings = {
+                    brightness: parseFloat(brightnessSlider.value),
+                    color_temp: parseFloat(colorTempSlider.value),
+                    mode: currentMode
+                };
+                
+                fetch('/api/light_control', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(settings)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        showNotification('设置已应用', 'success');
+                    } else {
+                        showNotification(data.message || '设置失败', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('应用设置失败:', error);
+                    showNotification('无法连接到服务器', 'error');
+                });
+            });
+            
+            // 显示通知
+            function showNotification(message, type = 'info') {
+                // 创建通知元素
+                const notification = document.createElement('div');
+                notification.className = `notification ${type}`;
+                notification.textContent = message;
+                
+                // 添加到页面
+                document.body.appendChild(notification);
+                
+                // 3秒后移除
+                setTimeout(() => {
+                    notification.remove();
+                }, 3000);
+            }
+            
+            // 初始化事件监听
+            brightnessSlider.addEventListener('input', updateDisplay);
+            colorTempSlider.addEventListener('input', updateDisplay);
+            
+            // 初始显示
+            updateDisplay();
+        });
+    </script>
+</body>
+</html>

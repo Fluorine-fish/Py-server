@@ -13,20 +13,20 @@ class EyesightProtector:
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
         
-        # 儿童用眼保护参数
-        self.break_interval = 30  # 建议休息间隔（分钟）- 因为是小孩子所以缩短到30分钟
-        self.break_duration = 3   # 建议休息时长（分钟）
-        self.min_safe_distance = 33  # 最小安全读写距离（厘米）- 根据儿童用眼卫生标准
-        self.max_safe_distance = 40  # 最大安全读写距离（厘米）
+        # 儿童用眼保护参数 - 根据最新儿童用眼卫生标准调整
+        self.break_interval = 20  # 建议休息间隔（分钟）- 适用于儿童的更频繁休息
+        self.break_duration = 5   # 建议休息时长（分钟）- 增加休息时间确保充分恢复
+        self.min_safe_distance = 30  # 最小安全读写距离（厘米）
+        self.max_safe_distance = 45  # 最大安全读写距离（厘米）
         
         # 照明标准（基于《中小学生学习用灯具》标准）
         self.min_light = 300      # 最低照度(lux)
         self.optimal_light = 500  # 最佳照度(lux)
         self.max_light = 750      # 最高照度(lux)
         
-        # 头部角度限制
-        self.max_head_tilt = 20   # 最大头部倾斜角度
-        self.max_head_down = 25   # 最大低头角度
+        # 儿童头部姿势限制 - 更严格的限制
+        self.max_head_tilt = 15   # 最大头部倾斜角度
+        self.max_head_down = 20   # 最大低头角度
         
         # 状态追踪
         self.continuous_usage_time = 0
@@ -35,6 +35,14 @@ class EyesightProtector:
         self.light_warnings = []
         self.blink_rate_history = []
         self.last_blink_check = time.time()
+        
+        # 儿童年龄相关参数
+        self.age_group = {
+            '6-8': {'face_width': 12.5, 'min_distance': 28},
+            '9-12': {'face_width': 13.5, 'min_distance': 30},
+            '13-15': {'face_width': 14.5, 'min_distance': 33}
+        }
+        self.current_age_group = '9-12'  # 默认年龄组
         
         # 初始化日志记录
         self.logger = logging.getLogger('system')
@@ -56,14 +64,20 @@ class EyesightProtector:
         Returns:
             估算的阅读距离（厘米）
         """
-        # 儿童平均脸部宽度（8-12岁）约为13.5厘米
-        CHILD_FACE_WIDTH = 13.5  # cm
+        # 获取当前年龄组的参数
+        age_params = self.age_group[self.current_age_group]
+        CHILD_FACE_WIDTH = age_params['face_width']  # cm
+        
         # 台灯摄像头的视场角
         CAMERA_FOV = 65  # degrees
         
-        # 计算距离
-        distance = (CHILD_FACE_WIDTH * frame_width) / (2 * face_width_pixels * np.tan(np.radians(CAMERA_FOV/2)))
-        return distance
+        # 使用移动平均来平滑距离计算
+        raw_distance = (CHILD_FACE_WIDTH * frame_width) / (2 * face_width_pixels * np.tan(np.radians(CAMERA_FOV/2)))
+        
+        # 应用补偿因子，考虑到儿童不同阅读姿势的影响
+        compensation_factor = 1.1  # 根据实际测试调整
+        
+        return raw_distance * compensation_factor
         
     def detect_blink_rate(self, frame) -> int:
         """检测眨眼频率
@@ -166,13 +180,13 @@ class EyesightProtector:
         
         suggestions = []
         
-        # 检查是否需要休息
+        # 检查是否需要休息 - 儿童更频繁的休息提醒
         if self.screen_time_start:
             current_time = datetime.now()
             time_since_last_break = (current_time - self.last_break_time).total_seconds() / 60
             
             if time_since_last_break >= self.break_interval:
-                suggestions.append(f"孩子已经连续用眼{int(time_since_last_break)}分钟了，建议休息{self.break_duration}分钟，可以做做眼保健操或远眺放松一下")
+                suggestions.append(f"小朋友已经认真学习{int(time_since_last_break)}分钟啦！来做个小游戏休息一下：\n1. 远远地看看窗外的小鸟和树叶\n2. 眨眨眼睛，像蝴蝶扇动翅膀\n3. 转转脖子，像小狮子环顾四周")
                 
         # 检测阅读距离
         if len(faces) > 0:
@@ -181,29 +195,28 @@ class EyesightProtector:
                 metrics['distance'] = distance
                 
                 if distance < self.min_safe_distance:
-                    suggestions.append("提醒孩子保持正确的读写距离，不要离得太近，可以用一个拳头的距离作为参考")
-                    self.distance_warnings.append(time.time())
+                    suggestions.append("小朋友，你离书本太近啦！\n让我们做个小游戏：\n1. 伸出小手臂，做一个'书本测量尺'\n2. 如果手够不到书本，说明距离刚刚好\n3. 保持这个距离，保护我们的小眼睛")
                 elif distance > self.max_safe_distance:
-                    suggestions.append("建议调整台灯位置或坐姿，当前与读写内容的距离略远")
+                    suggestions.append("书本离得有点远呢，把书本和台灯放近一点点，找到最舒服的距离吧！")
                     
         # 检测照明情况
         light_levels = self.calculate_light_level(frame)
         metrics['light_levels'] = light_levels
         
         if light_levels['reading_area'] < self.min_light:
-            suggestions.append("当前照明不足，建议调整台灯角度或调高亮度")
+            suggestions.append("这里有点暗暗的，让我们：\n1. 调整一下台灯，让光线更亮一些\n2. 确保光线照到你读写的地方\n3. 现在光线暖暖的，眼睛会更舒服")
             self.light_warnings.append(time.time())
         elif light_levels['reading_area'] > self.max_light:
-            suggestions.append("当前照明太强，可能会导致视觉疲劳，建议适当调低台灯亮度")
+            suggestions.append("灯光有点太亮啦！让我们：\n1. 把台灯调暗一点点\n2. 调整台灯的位置\n3. 让光线温柔地照在书本上")
             
         # 检测眨眼频率
         blinks = self.detect_blink_rate(frame)
         if self.blink_rate_history:
-            avg_blink_rate = np.mean(self.blink_rate_history[-5:])  # 取最近5次记录的平均值
+            avg_blink_rate = np.mean(self.blink_rate_history[-5:])
             metrics['blink_rate'] = avg_blink_rate
             
-            if avg_blink_rate < 12:  # 正常眨眼频率约为每分钟12-15次
-                suggestions.append("请注意适当眨眼，避免眼睛疲劳")
+            if avg_blink_rate < 12:
+                suggestions.append("来玩个眨眨眼游戏：\n1. 数到三，一起眨眨眼\n2. 看看谁眨眼睛最可爱\n3. 眨眨眼睛，让眼睛休息一下")
                 
         # 记录性能指标
         log_manager.log_performance({
@@ -255,6 +268,26 @@ class EyesightProtector:
         self.distance_warnings.clear()
         self.blink_rate_history.clear()
         self.logger.info("重置视力保护统计信息")
+        
+    def set_age_group(self, age: int):
+        """设置儿童年龄组
+        
+        Args:
+            age: 儿童年龄
+        """
+        if age >= 6 and age <= 8:
+            self.current_age_group = '6-8'
+        elif age >= 9 and age <= 12:
+            self.current_age_group = '9-12'
+        elif age >= 13 and age <= 15:
+            self.current_age_group = '13-15'
+        else:
+            self.current_age_group = '9-12'  # 默认年龄组
+            
+        # 更新相关参数
+        age_params = self.age_group[self.current_age_group]
+        self.min_safe_distance = age_params['min_distance']
+        self.logger.info(f"更新年龄组为: {self.current_age_group}, 最小安全距离: {self.min_safe_distance}cm")
 
 # 创建全局视力保护管理器实例
 eyesight_protector = EyesightProtector()

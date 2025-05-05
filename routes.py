@@ -32,6 +32,9 @@ posture_monitor = WebPostureMonitor(video_stream_handler=video_stream_handler)
 serial_handler = SerialHandler(monitoring_interval=5)
 print("串口通信处理器初始化完成")
 
+# 导入久坐监控模块
+from modules.monitor_module import sitting_monitor, initialize_monitor
+
 # API版本
 API_VERSION = "1.1.0"
 
@@ -1002,4 +1005,63 @@ def reset_monitor():
     return jsonify({
         'status': 'success',
         'message': '监控状态已重置'
+    })
+
+@routes.route('/api/sitting/status')
+def get_sitting_status():
+    """获取久坐状态信息"""
+    if sitting_monitor is None:
+        return jsonify({
+            'status': 'error',
+            'message': '久坐监控器未初始化'
+        })
+        
+    status = sitting_monitor.get_status()
+    return jsonify({
+        'status': 'success',
+        'data': status
+    })
+
+@routes.route('/api/sitting/config', methods=['POST'])
+def update_sitting_config():
+    """更新久坐监控配置"""
+    if sitting_monitor is None:
+        return jsonify({
+            'status': 'error',
+            'message': '久坐监控器未初始化'
+        })
+        
+    try:
+        data = request.get_json()
+        
+        if 'sitting_threshold' in data:
+            sitting_monitor.sitting_threshold = int(data['sitting_threshold'])
+        if 'warning_interval' in data:
+            sitting_monitor.warning_interval = int(data['warning_interval'])
+        if 'break_duration' in data:
+            sitting_monitor.break_duration = int(data['break_duration'])
+            
+        return jsonify({
+            'status': 'success',
+            'message': '久坐监控配置已更新'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'更新配置失败: {str(e)}'
+        })
+
+@routes.route('/api/sitting/reset', methods=['POST'])
+def reset_sitting_monitor():
+    """重置久坐监控状态"""
+    if sitting_monitor is None:
+        return jsonify({
+            'status': 'error',
+            'message': '久坐监控器未初始化'
+        })
+    
+    sitting_monitor.record_standing()
+    return jsonify({
+        'status': 'success',
+        'message': '久坐监控状态已重置'
     })

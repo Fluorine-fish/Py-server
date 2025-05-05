@@ -5,10 +5,11 @@ import os
 import sys
 import atexit
 from flask import Flask
+from flask_cors import CORS
 import time
 
 # 导入配置
-from config import OPEN_HOST, OPEN_PORT, SERIAL_BAUDRATE
+from config import OPEN_HOST, OPEN_PORT, SERIAL_BAUDRATE, SERIAL_CONFIG
 
 # 导入各个功能模块
 from modules.database_module import init_database
@@ -16,12 +17,14 @@ from modules.video_stream_module import VideoStreamHandler
 from modules.posture_module import WebPostureMonitor, PROCESS_WIDTH, PROCESS_HEIGHT
 from modules.serial_module import SerialCommunicationHandler
 from modules.routes import routes_bp, setup_services
+from modules.monitor_module import initialize_monitor
 
 def create_app():
     """创建并配置Flask应用"""
     print("\n========== 开始初始化应用 ==========")
     # 初始化Flask应用
     app = Flask(__name__)
+    CORS(app)
     
     # 注册路由蓝图
     app.register_blueprint(routes_bp)
@@ -76,18 +79,25 @@ def create_app():
     
     # 尝试初始化串口通信处理器，允许失败
     try:
-        serial_handler = SerialCommunicationHandler(baudrate=SERIAL_BAUDRATE)
+        serial_handler = SerialCommunicationHandler(
+            port=SERIAL_CONFIG.get('port'),
+            baudrate=SERIAL_CONFIG.get('baudrate', 115200)
+        )
         serial_available = serial_handler is not None and hasattr(serial_handler, 'initialized') and serial_handler.initialized
+        
+        # 初始化久坐监控器
+        if serial_available:
+            print("正在初始化久坐监控器...")
+            sitting_monitor = initialize_monitor(serial_handler)
+            if sitting_monitor:
+                print("久坐监控器初始化成功")
+            else:
+                print("警告：久坐监控器初始化失败")
     except Exception as e:
-        print(f"串口通信初始化失败，但不影响姿势分析系统: {str(e)}")
-        serial_handler = None
+        print(f"串口通信系统初始化失败: {str(e)}")
         serial_available = False
-    
-    # 通知用户串口和姿势分析系统的状态
-    if serial_available:
-        print("串口通信系统初始化成功")
     else:
-        print("串口通信系统未启动，但姿势分析系统可以正常工作")
+        print("串口通信系统已初始化")
     
     # 设置路由模块依赖的服务
     setup_services(

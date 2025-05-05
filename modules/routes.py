@@ -142,7 +142,7 @@ def read_frame_api():
     except Exception as e:
         return jsonify({
             'status': 'error',
-            'message': f"读取帧数据时出错: {str(e)}",
+            'message': f'读取帧数据时出错: {str(e)}',
             'frame_data': None
         })
 
@@ -636,7 +636,6 @@ def set_resolution_mode():
             'quality': quality
         })
     except Exception as e:
-        print(f"设置分辨率模式出错: {str(e)}")
         return jsonify({
             'status': 'error',
             'message': f'设置分辨率模式失败: {str(e)}'
@@ -671,6 +670,12 @@ def new_ui_eyesight():
 def new_ui_emotion():
     """新的 UI 界面情绪分析页面"""
     return render_template('new_UI/emotionds.html')
+
+# 新 UI 路由 - 照明控制页面
+@routes_bp.route('/new-ui/lighting')
+def new_ui_lighting():
+    """新的 UI 界面照明控制页面"""
+    return render_template('new-main/lighting.html')
 
 # 新 UI 路由 - 获取所有传感器数据 API
 @routes_bp.route('/api/get_all_sensors_data')
@@ -1056,3 +1061,48 @@ def _parse_time_param(time_str):
         return datetime.fromisoformat(time_str.replace('Z', '+00:00'))
     except:
         return None
+
+@routes_bp.route('/api/light_control', methods=['POST'])
+def light_control():
+    """控制台灯照明
+    
+    请求参数:
+        brightness: 亮度值 (0-100)
+        color_temp: 色温值 (2700-6500)
+        mode: 照明模式 (0-3)
+            0: 手动模式
+            1: 自动模式
+            2: 阅读模式
+            3: 休息模式
+    """
+    try:
+        data = request.json
+        brightness = float(data.get('brightness', 50.0))  # 默认50%亮度
+        color_temp = float(data.get('color_temp', 4000.0))  # 默认4000K
+        mode = int(data.get('mode', 0))  # 默认手动模式
+        
+        if not serial_handler or not serial_handler.is_connected():
+            return jsonify({
+                'status': 'error',
+                'message': '串口未连接，请先连接串口'
+            })
+            
+        # 发送照明控制命令
+        success = serial_handler.send_light_control(brightness, color_temp, mode)
+        
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': f'照明控制命令已发送: 亮度={brightness:.1f}%, 色温={color_temp:.0f}K, 模式={mode}'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': '发送照明控制命令失败'
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'处理请求时出错: {str(e)}'
+        })

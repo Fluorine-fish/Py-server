@@ -25,14 +25,19 @@ def init_database():
             )
         """)
 
-        # 创建姿势记录表
+        # 创建姿势记录表（更新后的结构）
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS posture_records (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 timestamp DATETIME(6),
-                angle FLOAT,
+                head_angle FLOAT,
+                neck_angle FLOAT,
+                shoulder_tilt FLOAT,
+                spine_angle FLOAT,
                 posture_quality VARCHAR(20),
+                posture_score FLOAT,
                 is_occluded BOOLEAN,
+                issues JSON,
                 duration INT,
                 session_id VARCHAR(36)
             )
@@ -658,3 +663,237 @@ def add_notification_methods(manager_class):
 DatabaseManager = add_child_profile_methods(DatabaseManager)
 DatabaseManager = add_device_config_methods(DatabaseManager)
 DatabaseManager = add_notification_methods(DatabaseManager)
+
+"""数据库处理模块 - 提供数据存储和检索功能"""
+import mysql.connector
+import pytz
+from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, Boolean, JSON
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from config import DB_CONFIG
+
+Base = declarative_base()
+
+class PostureRecord(Base):
+    """姿势记录表"""
+    __tablename__ = 'posture_records'
+    
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    head_angle = Column(Float)        # 头部角度
+    neck_angle = Column(Float)        # 颈部角度
+    shoulder_tilt = Column(Float)     # 肩部倾斜角度
+    spine_angle = Column(Float)       # 脊柱倾斜角度
+    posture_quality = Column(String(20))  # good, slightly_bad, bad, severe
+    posture_score = Column(Float)     # 姿势综合评分(0-100)
+    is_occluded = Column(Boolean)     # 是否被遮挡
+    issues = Column(JSON)             # 检测到的问题列表
+    duration = Column(Integer)        # 持续时间(秒)
+    session_id = Column(String(36))   # 会话ID
+    
+class EmotionRecord(Base):
+    """情绪记录表"""
+    __tablename__ = 'emotion_records'
+    
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    emotion_type = Column(String(20))
+    confidence = Column(Float)
+    session_id = Column(String(36))
+
+class FocusRecord(Base):
+    """专注度记录表"""
+    __tablename__ = 'focus_records'
+    
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    focus_score = Column(Float)
+    posture_weight = Column(Float)
+    emotion_weight = Column(Float)
+    duration = Column(Integer)
+    session_id = Column(String(36))
+
+def init_db():
+    """初始化数据库连接和表结构"""
+    try:
+        engine = create_engine(f'mysql+mysqlconnector://{DB_CONFIG["user"]}:{DB_CONFIG["password"]}@{DB_CONFIG["host"]}/{DB_CONFIG["database"]}')
+        Base.metadata.create_all(engine)
+        print("数据库表结构初始化成功")
+        return True
+    except Exception as e:
+        print(f"数据库初始化失败: {str(e)}")
+        return False
+
+def save_posture_record(posture_data, session_id=None):
+    """保存姿势记录到数据库
+    
+    Args:
+        posture_data: 包含多关节姿势分析结果的字典
+        session_id: 会话ID
+    """
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        sql = """INSERT INTO posture_records 
+                (timestamp, head_angle, neck_angle, shoulder_tilt, spine_angle,
+                 posture_quality, posture_score, is_occluded, issues, duration, session_id) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                
+        current_time = datetime.now(pytz.UTC)
+        
+        # 从姿势数据中提取角度信息
+        angles = posture_data.get('angles', {})
+        
+        values = (
+            current_time,
+            angles.get('head'),
+            angles.get('neck'),
+            angles.get('shoulder'),
+            angles.get('spine'),
+            posture_data.get('quality', 'unknown'),
+            posture_data.get('score', 0),
+            posture_data.get('is_occluded', False),
+            json.dumps(posture_data.get('issues', [])),
+            posture_data.get('duration', 0),
+            session_id
+        )
+        
+        cursor.execute(sql, values)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"保存姿势记录失败: {str(e)}")
+        return False
+
+def save_emotion_record(emotion_type, confidence, session_id=None):
+    """保存情绪记录到数据库"""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        sql = """INSERT INTO emotion_records 
+                (timestamp, emotion_type, confidence, session_id) 
+                VALUES (%s, %s, %s, %s)"""
+        current_time = datetime.now(pytz.UTC)
+        values = (current_time, emotion_type, confidence, session_id)
+        
+        cursor.execute(sql, values)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"保存情绪记录失败: {str(e)}")
+        return False
+
+def save_focus_record(focus_score, posture_weight, emotion_weight, duration, session_id=None):
+    """保存专注度记录到数据库"""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        sql = """INSERT INTO focus_records 
+                (timestamp, focus_score, posture_weight, emotion_weight, duration, session_id) 
+                VALUES (%s, %s, %s, %s, %s, %s)"""
+        current_time = datetime.now(pytz.UTC)
+        values = (current_time, focus_score, posture_weight, emotion_weight, duration, session_id)
+        
+        cursor.execute(sql, values)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"保存专注度记录失败: {str(e)}")
+        return False
+
+def get_posture_stats(start_time=None, end_time=None, session_id=None):
+    """获取姿势分析统计数据"""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+        
+        where_clauses = []
+        params = []
+        
+        if start_time:
+            where_clauses.append("timestamp >= %s")
+            params.append(start_time)
+        if end_time:
+            where_clauses.append("timestamp <= %s")
+            params.append(end_time)
+        if session_id:
+            where_clauses.append("session_id = %s")
+            params.append(session_id)
+            
+        where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+        
+        # 获取总计统计
+        stats_sql = f"""
+            SELECT 
+                COUNT(*) as total_records,
+                AVG(head_angle) as avg_head_angle,
+                AVG(neck_angle) as avg_neck_angle,
+                AVG(shoulder_tilt) as avg_shoulder_tilt,
+                AVG(spine_angle) as avg_spine_angle,
+                AVG(posture_score) as avg_score,
+                SUM(CASE WHEN posture_quality = 'good' THEN duration ELSE 0 END) as good_duration,
+                SUM(CASE WHEN posture_quality = 'slightly_bad' THEN duration ELSE 0 END) as slightly_bad_duration,
+                SUM(CASE WHEN posture_quality = 'bad' THEN duration ELSE 0 END) as bad_duration,
+                SUM(CASE WHEN posture_quality = 'severe' THEN duration ELSE 0 END) as severe_duration,
+                SUM(CASE WHEN is_occluded = 1 THEN duration ELSE 0 END) as occluded_duration
+            FROM posture_records
+            WHERE {where_sql}
+        """
+        cursor.execute(stats_sql, params)
+        stats = cursor.fetchone()
+        
+        # 获取时间趋势数据
+        trend_sql = f"""
+            SELECT 
+                DATE_FORMAT(timestamp, '%Y-%m-%d %H:00:00') as hour,
+                AVG(head_angle) as avg_head_angle,
+                AVG(neck_angle) as avg_neck_angle,
+                AVG(shoulder_tilt) as avg_shoulder_tilt,
+                AVG(spine_angle) as avg_spine_angle,
+                AVG(posture_score) as avg_score,
+                COUNT(*) as count,
+                SUM(CASE WHEN posture_quality = 'good' THEN 1 ELSE 0 END) as good_count
+            FROM posture_records
+            WHERE {where_sql}
+            GROUP BY DATE_FORMAT(timestamp, '%Y-%m-%d %H:00:00')
+            ORDER BY hour DESC
+            LIMIT 24
+        """
+        cursor.execute(trend_sql, params)
+        trends = cursor.fetchall()
+        
+        # 获取常见问题统计
+        issues_sql = f"""
+            SELECT 
+                JSON_EXTRACT(issues, '$[*]') as issue_list,
+                COUNT(*) as count
+            FROM posture_records
+            WHERE {where_sql} AND issues IS NOT NULL
+            GROUP BY JSON_EXTRACT(issues, '$[*]')
+            ORDER BY count DESC
+            LIMIT 10
+        """
+        cursor.execute(issues_sql, params)
+        issues = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            'stats': stats,
+            'trends': trends,
+            'common_issues': issues
+        }
+    except Exception as e:
+        print(f"获取姿势统计数据失败: {str(e)}")
+        return None

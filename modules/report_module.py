@@ -5,6 +5,8 @@ from io import BytesIO
 import base64
 from fpdf import FPDF
 import os
+from typing import Dict, Any, Optional
+from .logging_module import log_manager
 
 class ReportGenerator:
     def __init__(self, db_manager):
@@ -12,84 +14,302 @@ class ReportGenerator:
         self.report_path = "static/reports"
         os.makedirs(self.report_path, exist_ok=True)
         
+        # 中文字体支持
+        plt.rcParams['font.sans-serif'] = ['SimHei']
+        plt.rcParams['axes.unicode_minus'] = False
+    
+    def validate_data(self, stats: Dict[str, Any], required_fields: list) -> tuple[bool, list]:
+        """验证数据完整性
+        
+        Args:
+            stats: 需要验证的统计数据
+            required_fields: 必需的字段列表
+            
+        Returns:
+            tuple: (是否验证通过, 缺失字段列表)
+        """
+        missing_fields = []
+        if not stats:
+            return False, required_fields
+            
+        for field in required_fields:
+            if field not in stats or stats[field] is None:
+                missing_fields.append(field)
+                
+        return len(missing_fields) == 0, missing_fields
+    
+    def validate_posture_stats(self, stats: Dict[str, Any]) -> bool:
+        """验证姿势统计数据完整性"""
+        required_fields = [
+            'stats',
+            'trends',
+            'common_issues'
+        ]
+        
+        is_valid, missing_fields = self.validate_data(stats, required_fields)
+        if not is_valid:
+            log_manager.log_system_event(
+                'data_validation',
+                f'姿势数据不完整，缺失字段: {", ".join(missing_fields)}',
+                'warning'
+            )
+            return False
+            
+        # 验证统计数据字段
+        if 'stats' in stats:
+            stat_fields = [
+                'avg_head_angle',
+                'avg_neck_angle',
+                'avg_shoulder_tilt',
+                'avg_spine_angle',
+                'avg_score',
+                'good_duration',
+                'slightly_bad_duration',
+                'bad_duration',
+                'severe_duration',
+                'occluded_duration'
+            ]
+            is_valid, missing_fields = self.validate_data(stats['stats'], stat_fields)
+            if not is_valid:
+                log_manager.log_system_event(
+                    'data_validation',
+                    f'姿势统计数据不完整，缺失字段: {", ".join(missing_fields)}',
+                    'warning'
+                )
+                return False
+                
+        return True
+    
+    def validate_emotion_stats(self, stats: Dict[str, Any]) -> bool:
+        """验证情绪统计数据完整性"""
+        required_fields = ['distribution', 'trends']
+        is_valid, missing_fields = self.validate_data(stats, required_fields)
+        if not is_valid:
+            log_manager.log_system_event(
+                'data_validation',
+                f'情绪数据不完整，缺失字段: {", ".join(missing_fields)}',
+                'warning'
+            )
+        return is_valid
+    
+    def validate_focus_stats(self, stats: list) -> bool:
+        """验证专注度统计数据完整性"""
+        if not stats:
+            log_manager.log_system_event(
+                'data_validation',
+                '专注度数据为空',
+                'warning'
+            )
+            return False
+            
+        required_fields = ['timestamp', 'focus_score']
+        for record in stats:
+            is_valid, missing_fields = self.validate_data(vars(record), required_fields)
+            if not is_valid:
+                log_manager.log_system_event(
+                    'data_validation',
+                    f'专注度数据记录不完整，缺失字段: {", ".join(missing_fields)}',
+                    'warning'
+                )
+                return False
+        return True
+    
+    def validate_eyesight_stats(self, stats: list) -> bool:
+        """验证用眼健康统计数据完整性"""
+        if not stats:
+            log_manager.log_system_event(
+                'data_validation',
+                '用眼健康数据为空',
+                'warning'
+            )
+            return False
+            
+        required_fields = [
+            'timestamp',
+            'screen_distance',
+            'ambient_light',
+            'blink_rate',
+            'usage_duration',
+            'warning_count'
+        ]
+        
+        for record in stats:
+            is_valid, missing_fields = self.validate_data(vars(record), required_fields)
+            if not is_valid:
+                log_manager.log_system_event(
+                    'data_validation',
+                    f'用眼健康数据记录不完整，缺失字段: {", ".join(missing_fields)}',
+                    'warning'
+                )
+                return False
+        return True
+
     def generate_daily_report(self, date=None):
         """生成每日报告"""
-        if date is None:
-            date = datetime.now()
-        
-        start_time = datetime.combine(date.date(), datetime.min.time())
-        end_time = start_time + timedelta(days=1)
-        
-        # 获取各项统计数据
-        posture_stats = self.db_manager.get_posture_stats(start_time, end_time)
-        emotion_stats = self.db_manager.get_emotion_stats(start_time, end_time)
-        focus_stats = self.db_manager.get_focus_stats(start_time, end_time)
-        eyesight_stats = self.db_manager.get_eyesight_stats(start_time, end_time)
-        
-        # 创建PDF报告
-        pdf = FPDF()
-        pdf.add_page()
-        
-        # 报告标题
-        pdf.set_font('Arial', 'B', 16)
-        pdf.cell(0, 10, f'每日健康报告 - {date.strftime("%Y-%m-%d")}', ln=True, align='C')
-        
-        # 姿势分析部分
-        self._add_posture_section(pdf, posture_stats)
-        
-        # 情绪分析部分
-        self._add_emotion_section(pdf, emotion_stats)
-        
-        # 专注度分析部分
-        self._add_focus_section(pdf, focus_stats)
-        
-        # 用眼健康部分
-        self._add_eyesight_section(pdf, eyesight_stats)
-        
-        # 保存报告
-        filename = f'daily_report_{date.strftime("%Y%m%d")}.pdf'
-        filepath = os.path.join(self.report_path, filename)
-        pdf.output(filepath)
-        
-        return filepath
-        
+        try:
+            if date is None:
+                date = datetime.now()
+            
+            start_time = datetime.combine(date.date(), datetime.min.time())
+            end_time = start_time + timedelta(days=1)
+            
+            log_manager.log_system_event(
+                'report_generation',
+                f'开始生成每日报告 {date.strftime("%Y-%m-%d")}',
+                'info'
+            )
+            
+            # 获取各项统计数据
+            posture_stats = self.db_manager.get_posture_stats(start_time, end_time)
+            emotion_stats = self.db_manager.get_emotion_stats(start_time, end_time)
+            focus_stats = self.db_manager.get_focus_stats(start_time, end_time)
+            eyesight_stats = self.db_manager.get_eyesight_stats(start_time, end_time)
+            
+            # 验证数据完整性
+            if not self.validate_posture_stats(posture_stats):
+                log_manager.log_system_event(
+                    'report_generation',
+                    '姿势数据验证失败，报告可能不完整',
+                    'warning'
+                )
+                
+            if not self.validate_emotion_stats(emotion_stats):
+                log_manager.log_system_event(
+                    'report_generation',
+                    '情绪数据验证失败，报告可能不完整',
+                    'warning'
+                )
+                
+            if not self.validate_focus_stats(focus_stats):
+                log_manager.log_system_event(
+                    'report_generation',
+                    '专注度数据验证失败，报告可能不完整',
+                    'warning'
+                )
+                
+            if not self.validate_eyesight_stats(eyesight_stats):
+                log_manager.log_system_event(
+                    'report_generation',
+                    '用眼健康数据验证失败，报告可能不完整',
+                    'warning'
+                )
+            
+            # 创建PDF报告
+            pdf = FPDF()
+            pdf.add_page()
+            
+            # 报告标题
+            pdf.set_font('Arial', 'B', 16)
+            pdf.cell(0, 10, f'每日健康报告 - {date.strftime("%Y-%m-%d")}', ln=True, align='C')
+            
+            # 添加各部分内容
+            self._add_posture_section(pdf, posture_stats)
+            self._add_emotion_section(pdf, emotion_stats)
+            self._add_focus_section(pdf, focus_stats)
+            self._add_eyesight_section(pdf, eyesight_stats)
+            
+            # 保存报告
+            filename = f'daily_report_{date.strftime("%Y%m%d")}.pdf'
+            filepath = os.path.join(self.report_path, filename)
+            pdf.output(filepath)
+            
+            log_manager.log_system_event(
+                'report_generation',
+                f'每日报告生成成功: {filename}',
+                'info'
+            )
+            
+            return filepath
+            
+        except Exception as e:
+            error_msg = f'生成每日报告失败: {str(e)}'
+            log_manager.log_system_event('report_generation', error_msg, 'error')
+            raise
+    
     def generate_weekly_report(self, date=None):
         """生成周报告"""
-        if date is None:
-            date = datetime.now()
+        try:
+            if date is None:
+                date = datetime.now()
             
-        # 计算本周开始和结束时间
-        start_time = date - timedelta(days=date.weekday())
-        start_time = datetime.combine(start_time.date(), datetime.min.time())
-        end_time = start_time + timedelta(days=7)
-        
-        # 获取统计数据
-        posture_stats = self.db_manager.get_posture_stats(start_time, end_time)
-        emotion_stats = self.db_manager.get_emotion_stats(start_time, end_time)
-        focus_stats = self.db_manager.get_focus_stats(start_time, end_time)
-        eyesight_stats = self.db_manager.get_eyesight_stats(start_time, end_time)
-        
-        # 创建PDF报告
-        pdf = FPDF()
-        pdf.add_page()
-        
-        # 报告标题
-        pdf.set_font('Arial', 'B', 16)
-        pdf.cell(0, 10, f'周健康报告 - {start_time.strftime("%Y-%m-%d")} 至 {end_time.strftime("%Y-%m-%d")}', ln=True, align='C')
-        
-        # 添加各部分内容
-        self._add_posture_section(pdf, posture_stats, is_weekly=True)
-        self._add_emotion_section(pdf, emotion_stats, is_weekly=True)
-        self._add_focus_section(pdf, focus_stats, is_weekly=True)
-        self._add_eyesight_section(pdf, eyesight_stats, is_weekly=True)
-        
-        # 保存报告
-        filename = f'weekly_report_{start_time.strftime("%Y%m%d")}.pdf'
-        filepath = os.path.join(self.report_path, filename)
-        pdf.output(filepath)
-        
-        return filepath
-        
+            # 计算本周开始和结束时间
+            start_time = date - timedelta(days=date.weekday())
+            start_time = datetime.combine(start_time.date(), datetime.min.time())
+            end_time = start_time + timedelta(days=7)
+            
+            log_manager.log_system_event(
+                'report_generation',
+                f'开始生成周报 {start_time.strftime("%Y-%m-%d")} 至 {end_time.strftime("%Y-%m-%d")}',
+                'info'
+            )
+            
+            # 获取统计数据
+            posture_stats = self.db_manager.get_posture_stats(start_time, end_time)
+            emotion_stats = self.db_manager.get_emotion_stats(start_time, end_time)
+            focus_stats = self.db_manager.get_focus_stats(start_time, end_time)
+            eyesight_stats = self.db_manager.get_eyesight_stats(start_time, end_time)
+            
+            # 验证数据完整性
+            if not self.validate_posture_stats(posture_stats):
+                log_manager.log_system_event(
+                    'report_generation',
+                    '姿势数据验证失败，报告可能不完整',
+                    'warning'
+                )
+                
+            if not self.validate_emotion_stats(emotion_stats):
+                log_manager.log_system_event(
+                    'report_generation',
+                    '情绪数据验证失败，报告可能不完整',
+                    'warning'
+                )
+                
+            if not self.validate_focus_stats(focus_stats):
+                log_manager.log_system_event(
+                    'report_generation',
+                    '专注度数据验证失败，报告可能不完整',
+                    'warning'
+                )
+                
+            if not self.validate_eyesight_stats(eyesight_stats):
+                log_manager.log_system_event(
+                    'report_generation',
+                    '用眼健康数据验证失败，报告可能不完整',
+                    'warning'
+                )
+            
+            # 创建PDF报告
+            pdf = FPDF()
+            pdf.add_page()
+            
+            # 报告标题
+            pdf.set_font('Arial', 'B', 16)
+            pdf.cell(0, 10, f'周健康报告 - {start_time.strftime("%Y-%m-%d")} 至 {end_time.strftime("%Y-%m-%d")}', ln=True, align='C')
+            
+            # 添加各部分内容
+            self._add_posture_section(pdf, posture_stats, is_weekly=True)
+            self._add_emotion_section(pdf, emotion_stats, is_weekly=True)
+            self._add_focus_section(pdf, focus_stats, is_weekly=True)
+            self._add_eyesight_section(pdf, eyesight_stats, is_weekly=True)
+            
+            # 保存报告
+            filename = f'weekly_report_{start_time.strftime("%Y%m%d")}.pdf'
+            filepath = os.path.join(self.report_path, filename)
+            pdf.output(filepath)
+            
+            log_manager.log_system_event(
+                'report_generation',
+                f'周报生成成功: {filename}',
+                'info'
+            )
+            
+            return filepath
+            
+        except Exception as e:
+            error_msg = f'生成周报失败: {str(e)}'
+            log_manager.log_system_event('report_generation', error_msg, 'error')
+            raise
+    
     def _add_posture_section(self, pdf, stats, is_weekly=False):
         """添加姿势分析部分"""
         pdf.add_page()
@@ -101,31 +321,61 @@ class ReportGenerator:
         # 添加统计数据
         if stats and 'stats' in stats:
             s = stats['stats']
-            pdf.cell(0, 10, f'平均头部角度: {s["avg_angle"]:.1f}°', ln=True)
-            pdf.cell(0, 10, f'良好姿势时长: {self._format_duration(s["good_duration"])}', ln=True)
-            pdf.cell(0, 10, f'不良姿势时长: {self._format_duration(s["bad_duration"])}', ln=True)
-            pdf.cell(0, 10, f'遮挡时长: {self._format_duration(s["occluded_duration"])}', ln=True)
+            pdf.cell(0, 10, f'各关节平均角度:', ln=True)
+            pdf.cell(0, 10, f' - 头部: {s["avg_head_angle"]:.1f}°', ln=True)
+            pdf.cell(0, 10, f' - 颈部: {s["avg_neck_angle"]:.1f}°', ln=True)
+            pdf.cell(0, 10, f' - 肩部: {s["avg_shoulder_tilt"]:.1f}°', ln=True)
+            pdf.cell(0, 10, f' - 脊柱: {s["avg_spine_angle"]:.1f}°', ln=True)
+            pdf.cell(0, 10, f'平均姿势评分: {s["avg_score"]:.1f}', ln=True)
+            
+            pdf.cell(0, 10, '\n姿势时长统计:', ln=True)
+            pdf.cell(0, 10, f' - 良好姿势: {self._format_duration(s["good_duration"])}', ln=True)
+            pdf.cell(0, 10, f' - 轻微不良: {self._format_duration(s["slightly_bad_duration"])}', ln=True)
+            pdf.cell(0, 10, f' - 不良姿势: {self._format_duration(s["bad_duration"])}', ln=True)
+            pdf.cell(0, 10, f' - 严重不良: {self._format_duration(s["severe_duration"])}', ln=True)
+            pdf.cell(0, 10, f' - 遮挡时长: {self._format_duration(s["occluded_duration"])}', ln=True)
         
         # 添加趋势图
         if stats and 'trends' in stats:
             plt.figure(figsize=(10, 6))
             trends = stats['trends']
             hours = [t['hour'] for t in trends]
-            angles = [t['avg_angle'] for t in trends]
-            plt.plot(hours, angles)
-            plt.title('头部角度变化趋势')
+            
+            # 绘制多关节角度趋势
+            plt.subplot(2, 1, 1)
+            plt.plot(hours, [t['avg_head_angle'] for t in trends], label='头部角度')
+            plt.plot(hours, [t['avg_neck_angle'] for t in trends], label='颈部角度')
+            plt.plot(hours, [t['avg_shoulder_tilt'] for t in trends], label='肩部倾斜')
+            plt.plot(hours, [t['avg_spine_angle'] for t in trends], label='脊柱角度')
+            plt.title('关节角度变化趋势')
             plt.xlabel('时间')
             plt.ylabel('角度')
+            plt.legend()
             
-            # 将图保存为base64字符串
+            # 绘制姿势评分趋势
+            plt.subplot(2, 1, 2)
+            plt.plot(hours, [t['avg_score'] for t in trends], color='green')
+            plt.title('姿势综合评分趋势')
+            plt.xlabel('时间')
+            plt.ylabel('评分')
+            
+            # 调整布局并保存
+            plt.tight_layout()
             img_buf = BytesIO()
-            plt.savefig(img_buf, format='png')
+            plt.savefig(img_buf, format='png', dpi=300, bbox_inches='tight')
             img_buf.seek(0)
             plt.close()
             
-            # 添加图片到PDF
+            # 添加图表到PDF
             pdf.image(img_buf, x=10, y=None, w=190)
             
+        # 添加常见问题分析
+        if stats and 'common_issues' in stats:
+            pdf.cell(0, 10, '\n常见姿势问题:', ln=True)
+            for issue in stats['common_issues'][:5]:  # 显示前5个最常见的问题
+                issue_text = issue['issue_list'].strip('[]').strip('"').replace('\\', '')
+                pdf.cell(0, 10, f' - {issue_text}: {issue["count"]}次', ln=True)
+    
     def _add_emotion_section(self, pdf, stats, is_weekly=False):
         """添加情绪分析部分"""
         pdf.add_page()

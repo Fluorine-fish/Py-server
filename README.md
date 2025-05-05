@@ -1,8 +1,8 @@
 # Serial Communication Web Server
 
-一个基于 Flask 的串口通信 Web 服务器，支持串口数据收发和历史记录管理，添加了对特定帧格式的支持。
+一个基于 Flask 的串口通信 Web 服务器，支持串口数据收发和历史记录管理，添加了对特定帧格式和提醒功能的支持。
 
-A Flask-based web server for serial communication that supports sending/receiving serial data, managing historical records, and handling specific frame formats.
+A Flask-based web server for serial communication that supports sending/receiving serial data, managing historical records, and handling specific frame formats with reminder features.
 
 ## 功能特点 | Features
 
@@ -10,6 +10,8 @@ A Flask-based web server for serial communication that supports sending/receivin
 - Web 界面支持数据发送和接收 | Web interface for sending and receiving data
 - 支持特定帧格式的通信 | Support for specific frame format communication
 - 自动解析并显示接收到的帧数据 | Auto-parse and display received frame data
+- 支持久坐提醒和坐姿提醒功能 | Support for sitting and posture reminders
+- 为语音交互预留接口 | Reserved interface for voice interaction
 - 历史记录管理和分页显示 | Historical record management with pagination
 - MySQL 数据存储 | MySQL data storage
 - 实时响应显示 | Real-time response display
@@ -94,27 +96,37 @@ The server will start at http://127.0.0.1:5000
 ## 帧格式说明 | Frame Format
 
 ### 上位机发送帧格式 | Host Send Frame Format
-```
+```c
 typedef struct {
-    char start;     //0 帧头取 's'
-    char type;      //1 消息类型：上->下：0xA0
-    char find_bool; //2 是否追踪
-    float yaw;      //3-6 yaw数据
-    float pitch;    //7-10 pitch数据
-    char end;       //31 帧尾取'e'
+    char start;         //0 帧头取 's'
+    char type;          //1 消息类型：上->下：0xA0/0xA1
+    char find_bool;     //2 是否追踪
+    float yaw;         //3-6 yaw数据
+    float pitch;       //7-10 pitch数据
+    char reminder_type; //11 提醒类型：0=无提醒,1=久坐提醒,2=坐姿提醒,3=语音交互
+    char reserved[20];  //12-31 保留字节
+    char end;          //31 帧尾取'e'
 } usb_msg_t;
 ```
 
 ### 下位机发送帧格式 | Device Send Frame Format
-```
+```c
 typedef struct {
-    char start;     //0 帧头取 's'
-    char type;      //1 消息类型：下->上：0xB0
-    float yaw;      //2-5 yaw数据
-    float pitch;    //6-9 pitch数据
-    char end;       //31 帧尾取'e'
+    char start;        //0 帧头取 's'
+    char type;         //1 消息类型：下->上：0xB0
+    float yaw;        //2-5 yaw数据
+    float pitch;      //6-9 pitch数据
+    char alert_status; //10 提醒状态
+    char reserved[20]; //11-30 保留字节
+    char end;         //31 帧尾取'e'
 } usb_msgRX_t;
 ```
+
+### 提醒类型说明 | Reminder Types
+- 0x00: 无提醒 | No reminder
+- 0x01: 久坐提醒 | Long sitting reminder
+- 0x02: 坐姿提醒 | Posture reminder
+- 0x03: 语音交互 | Voice interaction
 
 ## 项目结构 | Project Structure
 

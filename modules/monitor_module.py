@@ -235,3 +235,119 @@ class ChildMonitor:
             self.posture_detector.reconfigure(
                 head_angle_threshold=config['head_angle_threshold']
             )
+
+"""久坐监控模块 - 检测和提醒儿童久坐行为"""
+import time
+from datetime import datetime, timedelta
+from .logging_module import log_manager
+from .serial_module import SerialCommunicationHandler
+
+class SittingMonitor:
+    def __init__(self, serial_handler: SerialCommunicationHandler):
+        self.serial_handler = serial_handler
+        
+        # 久坐检测参数（针对儿童设置更短的时间）
+        self.sitting_threshold = 20  # 久坐阈值（分钟）
+        self.warning_interval = 5    # 提醒间隔（分钟）
+        self.break_duration = 3      # 建议休息时长（分钟）
+        
+        # 活动状态追踪
+        self.last_movement_time = datetime.now()
+        self.last_warning_time = datetime.now()
+        self.is_sitting = False
+        self.continuous_sitting_duration = 0
+        
+        # 活动检测阈值
+        self.movement_threshold = 0.2  # 移动检测阈值（弧度）
+        self.standing_threshold = 5.0  # 起立检测阈值（秒）
+        
+    def update_status(self, posture_data):
+        """更新活动状态
+        
+        Args:
+            posture_data: 包含姿势信息的字典
+        """
+        current_time = datetime.now()
+        
+        # 检测是否有显著移动
+        if self._detect_movement(posture_data):
+            if not self.is_sitting:
+                self.last_movement_time = current_time
+            self.is_sitting = True
+            
+        # 计算持续坐姿时间
+        if self.is_sitting:
+            self.continuous_sitting_duration = (current_time - self.last_movement_time).total_seconds() / 60
+            
+            # 检查是否需要发送久坐提醒
+            if self._should_send_reminder():
+                self.send_sitting_reminder()
+                self.last_warning_time = current_time
+        
+    def _detect_movement(self, posture_data):
+        """检测是否有显著移动
+        
+        Args:
+            posture_data: 包含姿势信息的字典
+            
+        Returns:
+            bool: 是否检测到显著移动
+        """
+        # 提取关键角度数据
+        head_angle = posture_data.get('head_angle', 0)
+        neck_angle = posture_data.get('neck_angle', 0)
+        spine_angle = posture_data.get('spine_angle', 0)
+        
+        # 任何角度变化超过阈值都认为是显著移动
+        return (abs(head_angle) > self.movement_threshold or
+                abs(neck_angle) > self.movement_threshold or
+                abs(spine_angle) > self.movement_threshold)
+    
+    def _should_send_reminder(self):
+        """检查是否应该发送久坐提醒"""
+        if not self.is_sitting:
+            return False
+            
+        # 检查是否超过久坐阈值
+        if self.continuous_sitting_duration < self.sitting_threshold:
+            return False
+            
+        # 检查是否达到提醒间隔
+        time_since_last_warning = (datetime.now() - self.last_warning_time).total_seconds() / 60
+        return time_since_last_warning >= self.warning_interval
+    
+    def send_sitting_reminder(self):
+        """发送久坐提醒"""
+        try:
+            success = self.serial_handler.send_sitting_reminder(int(self.continuous_sitting_duration))
+            if success:
+                log_manager.info(f"发送久坐提醒成功：已持续静坐 {int(self.continuous_sitting_duration)} 分钟")
+            else:
+                log_manager.error("发送久坐提醒失败")
+        except Exception as e:
+            log_manager.error(f"发送久坐提醒时出错: {str(e)}")
+    
+    def record_standing(self):
+        """记录起立活动"""
+        self.is_sitting = False
+        self.continuous_sitting_duration = 0
+        self.last_movement_time = datetime.now()
+        log_manager.info("检测到起立活动，重置久坐计时")
+    
+    def get_status(self):
+        """获取当前状态信息"""
+        return {
+            'is_sitting': self.is_sitting,
+            'continuous_sitting_duration': self.continuous_sitting_duration,
+            'last_movement': self.last_movement_time.isoformat(),
+            'last_warning': self.last_warning_time.isoformat()
+        }
+
+# 创建全局久坐监控器实例
+sitting_monitor = None
+
+def initialize_monitor(serial_handler):
+    """初始化久坐监控器"""
+    global sitting_monitor
+    sitting_monitor = SittingMonitor(serial_handler)
+    return sitting_monitor
