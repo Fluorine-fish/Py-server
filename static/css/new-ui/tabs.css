@@ -5,62 +5,52 @@
 
 .tabs-container {
     width: 100%;
-    margin-bottom: var(--spacing-md);
+    margin-bottom: 2rem;
 }
 
 .tabs-nav {
     display: flex;
-    list-style: none;
-    border-bottom: var(--border-width) solid var(--border-color);
-    margin-bottom: var(--spacing-lg);
+    background-color: var(--background-primary);
+    border-radius: 8px 8px 0 0;
     overflow-x: auto;
-    scrollbar-width: none; /* Firefox */
-    gap: 2px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    box-shadow: 0 2px 4px var(--shadow-color);
 }
 
 .tabs-nav::-webkit-scrollbar {
-    display: none; /* Chrome, Safari, Edge */
+    display: none;
 }
 
-.tabs-nav-item {
-    position: relative;
-    margin-right: var(--spacing-md);
-}
-
-.tabs-nav-link {
-    display: flex;
-    align-items: center;
-    padding: var(--spacing-md) var(--spacing-sm);
-    color: var(--medium-gray);
-    font-weight: 500;
-    text-decoration: none;
-    transition: color var(--transition-fast);
+.tab-button {
+    padding: 1rem 1.5rem;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    cursor: pointer;
     white-space: nowrap;
+    position: relative;
+    transition: color 0.3s;
 }
 
-.tabs-nav-link:hover {
-    color: var(--primary-color);
-    text-decoration: none;
-}
-
-.tabs-nav-link.active {
+.tab-button:hover {
     color: var(--primary-color);
 }
 
-.tabs-nav-link.active::after {
+.tab-button.active {
+    color: var(--primary-color);
+    font-weight: 500;
+}
+
+.tab-button.active::after {
     content: '';
     position: absolute;
-    bottom: -1px;
+    bottom: 0;
     left: 0;
     width: 100%;
     height: 2px;
     background-color: var(--primary-color);
-}
-
-.tabs-nav-icon {
-    margin-right: var(--spacing-xs);
-    width: 16px;
-    height: 16px;
 }
 
 .tab-content-container {
@@ -72,25 +62,53 @@
 
 .tab-content {
     display: none;
-    padding: var(--spacing-md);
-    background: white;
-    border-radius: var(--border-radius);
-    box-shadow: var(--box-shadow);
-    min-height: 300px;
+    padding: 2rem;
+    background-color: var(--background-primary);
+    border-radius: 0 0 8px 8px;
+    box-shadow: 0 2px 4px var(--shadow-color);
 }
 
 .tab-content.active {
     display: block;
-    animation: fade-in var(--transition-normal);
+    animation: fadeIn 0.3s ease;
 }
 
-@keyframes fade-in {
+@keyframes fadeIn {
     from {
         opacity: 0;
+        transform: translateY(-10px);
     }
     to {
         opacity: 1;
+        transform: translateY(0);
     }
+}
+
+.tab-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+}
+
+.tab-section {
+    margin-bottom: 2rem;
+}
+
+.tab-section:last-child {
+    margin-bottom: 0;
+}
+
+.tab-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.tab-section-title {
+    color: var(--text-primary);
+    font-size: 1.25rem;
+    font-weight: 500;
 }
 
 /* Responsive tabs */
@@ -98,10 +116,32 @@
     .tabs-nav {
         flex-wrap: nowrap;
         padding-bottom: var(--spacing-xs);
+        flex-direction: column;
+        border-bottom: none;
     }
     
-    .tabs-nav-link {
-        padding: var(--spacing-sm);
+    .tab-button {
+        padding: 0.75rem 1rem;
+        font-size: 0.875rem;
+    }
+
+    .tabs-nav-item {
+        margin-right: 0;
+        margin-bottom: 2px;
+    }
+
+    .tabs-nav-link.active::after {
+        display: none;
+    }
+
+    .tab-content {
+        padding: 1rem;
+        border: 1px solid var(--border-color);
+        border-radius: var(--border-radius);
+    }
+    
+    .tab-grid {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -113,5 +153,36 @@
     .tabs-nav-link.active {
         background: var(--primary-color);
         color: white;
+    }
+}
+
+/* Tab Animations */
+.tab-content.slide-enter {
+    animation: slideIn var(--transition-normal);
+}
+
+.tab-content.slide-exit {
+    animation: slideOut var(--transition-normal);
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOut {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(-20px);
+        opacity: 0;
     }
 }

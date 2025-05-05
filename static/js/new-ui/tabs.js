@@ -115,3 +115,51 @@ function switchToTab(containerId, tabId) {
     
     tabLink.click();
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+    const tabs = document.querySelectorAll('.tabs li a');
+    const panels = document.querySelectorAll('.tab-panel');
+    
+    // 初始化标签页
+    function initTabs() {
+        const hash = window.location.hash || '#overview';
+        activateTab(hash);
+        
+        // 为每个标签添加点击事件
+        tabs.forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                e.preventDefault();
+                activateTab(tab.getAttribute('href'));
+            });
+        });
+        
+        // 处理浏览器后退/前进
+        window.addEventListener('hashchange', () => {
+            activateTab(window.location.hash || '#overview');
+        });
+    }
+    
+    // 激活指定标签页
+    function activateTab(hash) {
+        // 移除所有活动状态
+        tabs.forEach(tab => {
+            tab.parentElement.classList.remove('active');
+        });
+        panels.forEach(panel => {
+            panel.classList.remove('active');
+        });
+        
+        // 激活目标标签和面板
+        const targetTab = document.querySelector(`.tabs li a[href="${hash}"]`);
+        const targetPanel = document.querySelector(hash);
+        
+        if (targetTab && targetPanel) {
+            targetTab.parentElement.classList.add('active');
+            targetPanel.classList.add('active');
+            window.location.hash = hash;
+        }
+    }
+    
+    // 初始化
+    initTabs();
+});

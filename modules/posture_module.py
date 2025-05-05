@@ -555,7 +555,7 @@ class WebPostureMonitor:
         current_time = time.time()
         
         # 检查是否到达调整间隔
-        if not self.adaptive_resolution or (current_time - self.last_resolution_adjust_time) < RESOLUTION_ADJUST_INTERVAL:
+        if not self.adaptive_resolution或 (current_time - self.last_resolution_adjust_time) < RESOLUTION_ADJUST_INTERVAL:
             return
             
         capture_fps = self.capture_fps.get_fps()
@@ -1150,3 +1150,129 @@ class WebPostureMonitor:
             self.total_good_posture_time = 0
             self.total_bad_posture_time = 0
             self.posture_change_count = 0
+
+class PostureDetector:
+    """姿势检测器 - 处理实时姿势分析"""
+    def __init__(self):
+        """初始化姿势检测器"""
+        self.pose = mp_pose.Pose(
+            static_image_mode=False,    # 视频流模式
+            model_complexity=1,         # 中等复杂度模型
+            smooth_landmarks=True,      # 启用关键点平滑
+            min_detection_confidence=0.6,
+            min_tracking_confidence=0.5
+        )
+        
+        # 初始化状态参数
+        self.last_valid_angle = None
+        self.occlusion_counter = 0
+        self.clear_counter = 0
+        
+        # 姿势阈值设置
+        self.head_angle_threshold = HEAD_ANGLE_THRESHOLD  # 头部角度阈值
+        self.visibility_threshold = VISIBILITY_THRESHOLD  # 可见性阈值
+        
+    def detect_posture(self, frame):
+        """分析单帧图像中的姿势
+        
+        Args:
+            frame: OpenCV BGR格式的图像帧
+            
+        Returns:
+            字典包含以下信息：
+            - quality: 姿势质量 ('good', 'slightly_bad', 'bad', 'severe')
+            - angle: 头部角度
+            - is_occluded: 是否被遮挡
+            - landmarks: 姿势关键点
+        """
+        try:
+            # 转换为RGB格式处理
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pose_results = self.pose.process(frame_rgb)
+            
+            if not pose_results.pose_landmarks:
+                return {
+                    'quality': 'unknown',
+                    'angle': None,
+                    'is_occluded': True,
+                    'landmarks': None
+                }
+            
+            # 检测遮挡
+            is_occluded, _ = check_occlusion(pose_results.pose_landmarks.landmark)
+            self._update_occlusion_counters(is_occluded)
+            
+            # 确定最终遮挡状态
+            final_occlusion = self.occlusion_counter >= OCCLUSION_FRAMES_THRESHOLD
+            valid_detection = self.clear_counter >= CLEAR_FRAMES_THRESHOLD
+            
+            # 计算头部角度
+            angle_info = calculate_head_angle(pose_results.pose_landmarks.landmark, frame.shape)
+            
+            if angle_info[0] is not None:
+                angle, is_bad_posture, _ = angle_info
+                self.last_valid_angle = angle
+                
+                # 确定姿势质量
+                if is_bad_posture:
+                    if angle > self.head_angle_threshold * 1.5:
+                        quality = 'severe'
+                    elif angle > self.head_angle_threshold * 1.2:
+                        quality = 'bad'
+                    else:
+                        quality = 'slightly_bad'
+                else:
+                    quality = 'good'
+                    
+                return {
+                    'quality': quality,
+                    'angle': angle,
+                    'is_occluded': False,
+                    'landmarks': pose_results.pose_landmarks
+                }
+            
+            # 如果当前帧检测失败但有上一次的有效角度
+            if final_occlusion and self.last_valid_angle:
+                return {
+                    'quality': 'unknown',
+                    'angle': self.last_valid_angle,
+                    'is_occluded': True,
+                    'landmarks': None
+                }
+            
+            return {
+                'quality': 'unknown',
+                'angle': None,
+                'is_occluded': True,
+                'landmarks': None
+            }
+            
+        except Exception as e:
+            print(f"姿势检测异常: {str(e)}")
+            return {
+                'quality': 'error',
+                'angle': None,
+                'is_occluded': True,
+                'landmarks': None
+            }
+            
+    def _update_occlusion_counters(self, is_occluded):
+        """更新遮挡状态计数器"""
+        if is_occluded:
+            self.occlusion_counter = min(self.occlusion_counter + 1, OCCLUSION_FRAMES_THRESHOLD)
+            self.clear_counter = max(0, self.clear_counter - 1)
+        else:
+            self.clear_counter = min(self.clear_counter + 1, CLEAR_FRAMES_THRESHOLD)
+            self.occlusion_counter = max(0, self.occlusion_counter - 1)
+            
+    def reconfigure(self, head_angle_threshold=None, visibility_threshold=None):
+        """重新配置检测器参数
+        
+        Args:
+            head_angle_threshold: 新的头部角度阈值
+            visibility_threshold: 新的可见性阈值
+        """
+        if head_angle_threshold is not None:
+            self.head_angle_threshold = head_angle_threshold
+        if visibility_threshold is not None:
+            self.visibility_threshold = visibility_threshold

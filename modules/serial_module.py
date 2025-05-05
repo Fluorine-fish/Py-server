@@ -1,120 +1,198 @@
 """
-串口通信模块 - 处理与下位机的通信
+串口通信模块 - 负责与机械臂控制器的通信
 """
-import queue
-import math
+import serial
+import struct
 import time
-from serial_handler import SerialHandler
+from threading import Lock
+from .logging_module import log_manager
 
 class SerialCommunicationHandler:
-    """
-    串口通信处理器 - 包装SerialHandler类，添加特定于应用的功能
-    """
-    def __init__(self, port=None, baudrate=115200):
-        self.handler = SerialHandler(port=port, baudrate=baudrate)
-        self.initialized = True
-        self.port = port  # 添加port属性
-        self.baudrate = baudrate  # 添加baudrate属性
-        self._frame_queue = queue.Queue(maxsize=100)  # 限制队列大小以避免内存溢出
-        # 启动帧监控
-        self._start_frame_monitor()
+    """串口通信处理器"""
     
-    def _start_frame_monitor(self):
-        """启动帧监控，将收到的帧数据放入队列"""
-        def frame_callback(frame_data):
-            try:
-                # 转换弧度为角度以便前端显示
-                frame_data_with_degrees = frame_data.copy()
-                frame_data_with_degrees['yaw_degrees'] = math.degrees(frame_data['yaw'])
-                frame_data_with_degrees['pitch_degrees'] = math.degrees(frame_data['pitch'])
-                # 添加时间戳
-                frame_data_with_degrees['timestamp'] = time.time()
-                
-                # 防止队列满时阻塞，使用非阻塞方式加入队列
-                try:
-                    self._frame_queue.put_nowait(frame_data_with_degrees)
-                    print(f"收到新帧数据: type={frame_data['type']}, yaw={frame_data_with_degrees['yaw_degrees']:.2f}°, pitch={frame_data_with_degrees['pitch_degrees']:.2f}°")
-                except queue.Full:
-                    # 如果队列已满，移除最旧的数据再添加
-                    try:
-                        self._frame_queue.get_nowait()
-                        self._frame_queue.put_nowait(frame_data_with_degrees)
-                    except:
-                        pass  # 忽略可能的错误
-            except Exception as e:
-                print(f"处理帧数据时出错: {str(e)}")
+    # 通信协议常量
+    FRAME_HEADER = b's'
+    FRAME_TAIL = b'e'
+    FRAME_LENGTH = 32
+    
+    # 指令类型
+    CMD_TYPE_CONTROL = 0xA0  # 控制指令
+    CMD_TYPE_STATUS = 0xB0   # 状态反馈
+    CMD_TYPE_POSTURE = 0xA1  # 姿势矫正
+    CMD_TYPE_SITTING = 0xA2  # 久坐提醒
+    
+    def __init__(self, port="/dev/ttyUSB0", baudrate=115200):
+        self.port = port
+        self.baudrate = baudrate
+        self.serial_port = None
+        self.lock = Lock()
+        self.is_connected = False
+        self.last_error = None
         
-        # 启动帧监控
-        if hasattr(self.handler, 'start_frame_monitor'):
-            self.handler.start_frame_monitor(callback=frame_callback)
-            print("已启动帧数据监控")
-    
-    def _stop_frame_monitor(self):
-        """停止帧监控"""
-        if hasattr(self.handler, 'stop_frame_monitor'):
-            self.handler.stop_frame_monitor()
-            print("已停止帧数据监控")
-    
-    def close(self):
-        """关闭串口连接"""
-        self._stop_frame_monitor()
-        if hasattr(self, 'handler') and self.handler:
-            self.handler.close()
-    
-    def is_connected(self):
-        """检查串口是否已连接"""
-        return self.handler.is_connected()
-    
     def connect(self):
-        """连接到串口"""
-        # 先设置处理器的端口和波特率
-        self.handler.port = self.port
-        self.handler.baudrate = self.baudrate
-        success = self.handler.connect()
-        if success:
-            # 重新启动帧监控
-            self._start_frame_monitor()
-        return success
+        """连接到串口设备"""
+        try:
+            self.serial_port = serial.Serial(
+                port=self.port,
+                baudrate=self.baudrate,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                timeout=1
+            )
+            self.is_connected = True
+            log_manager.info(f"成功连接到串口设备 {self.port}")
+            return True
+        except Exception as e:
+            self.last_error = str(e)
+            log_manager.error(f"连接串口设备失败: {e}")
+            self.is_connected = False
+            return False
     
-    def send_data(self, data):
-        """发送数据到串口，并返回响应"""
-        success = self.handler.send_data(data)
-        if success:
-            # 读取响应(如果有)
-            response = self.handler.read_data()
-            return response, "数据发送成功"
-        else:
-            return None, "发送数据失败"
+    def disconnect(self):
+        """断开串口连接"""
+        if self.serial_port and self.serial_port.is_open:
+            self.serial_port.close()
+        self.is_connected = False
+        log_manager.info("已断开串口连接")
     
-    def send_frame(self, find_bool, yaw, pitch):
-        """发送帧数据，转换为弧度制"""
-        # 将角度值转换为弧度值
-        yaw_rad = math.radians(yaw)    # 将度转换为弧度
-        pitch_rad = math.radians(pitch) # 将度转换为弧度
+    def send_command(self, command_data):
+        """发送命令到机械臂控制器
         
-        success = self.handler.send_yaw_pitch(find_bool, yaw_rad, pitch_rad)
-        if success:
-            # 读取响应(如果有)
-            response = self.handler.read_data()
-            return response, "帧数据发送成功"
-        else:
-            return None, "发送帧数据失败"
+        Args:
+            command_data: 包含命令信息的字典
+        """
+        if not self.is_connected:
+            log_manager.error("串口未连接")
+            return False
+            
+        try:
+            with self.lock:
+                if command_data['command'] == 'posture_correction':
+                    frame = self._build_posture_frame(command_data['angle'])
+                elif command_data['command'] == 'sitting_reminder':
+                    frame = self._build_sitting_frame(command_data['duration'])
+                else:
+                    frame = self._build_control_frame(command_data)
+                
+                self.serial_port.write(frame)
+                log_manager.debug(f"发送命令: {command_data}")
+                return True
+        except Exception as e:
+            self.last_error = str(e)
+            log_manager.error(f"发送命令失败: {e}")
+            return False
     
-    def read_frame(self):
-        """读取一帧数据"""
-        frame_data = self.handler.read_frame()
-        if frame_data:
-            # 将弧度值转换为角度值用于显示
-            frame_data['yaw_degrees'] = math.degrees(frame_data['yaw'])
-            frame_data['pitch_degrees'] = math.degrees(frame_data['pitch'])
-            return frame_data, "帧数据读取成功"
-        return None, "读取帧数据失败或无数据"
+    def _build_control_frame(self, command_data):
+        """构建标准控制帧"""
+        frame = bytearray(self.FRAME_LENGTH)
+        frame[0] = ord(self.FRAME_HEADER)  # 帧头
+        frame[1] = self.CMD_TYPE_CONTROL   # 控制指令类型
+        
+        # 填充控制数据
+        struct.pack_into('?', frame, 2, command_data.get('find_bool', False))
+        struct.pack_into('f', frame, 3, command_data.get('yaw', 0.0))
+        struct.pack_into('f', frame, 7, command_data.get('pitch', 0.0))
+        
+        frame[-1] = ord(self.FRAME_TAIL)   # 帧尾
+        return frame
     
-    def get_frame_queue(self):
-        """获取帧数据队列以供事件流使用"""
-        return self._frame_queue
+    def _build_posture_frame(self, angle):
+        """构建姿势矫正帧
+        
+        Args:
+            angle: 检测到的头部角度
+        """
+        frame = bytearray(self.FRAME_LENGTH)
+        frame[0] = ord(self.FRAME_HEADER)  # 帧头
+        frame[1] = self.CMD_TYPE_POSTURE   # 姿势矫正指令类型
+        
+        # 计算矫正角度
+        correction_angle = min(max(-45, angle), 45)  # 限制矫正角度范围
+        struct.pack_into('f', frame, 2, correction_angle)
+        
+        # 添加矫正力度参数（0-1范围）
+        force = min(abs(angle) / 45.0, 1.0)  # 角度越大，力度越大
+        struct.pack_into('f', frame, 6, force)
+        
+        frame[-1] = ord(self.FRAME_TAIL)   # 帧尾
+        return frame
     
-    def cleanup(self):
-        """清理资源"""
-        self._stop_frame_monitor()
-        self.close()
+    def _build_sitting_frame(self, duration):
+        """构建久坐提醒帧
+        
+        Args:
+            duration: 久坐时长（分钟）
+        """
+        frame = bytearray(self.FRAME_LENGTH)
+        frame[0] = ord(self.FRAME_HEADER)  # 帧头
+        frame[1] = self.CMD_TYPE_SITTING   # 久坐提醒指令类型
+        
+        # 填充久坐时长
+        struct.pack_into('I', frame, 2, duration)
+        
+        # 计算提醒强度（基于久坐时长）
+        intensity = min(duration / 60.0, 1.0)  # 超过1小时达到最大强度
+        struct.pack_into('f', frame, 6, intensity)
+        
+        frame[-1] = ord(self.FRAME_TAIL)   # 帧尾
+        return frame
+    
+    def receive_status(self):
+        """接收机械臂状态反馈
+        
+        Returns:
+            状态数据字典或None（如果接收失败）
+        """
+        if not self.is_connected:
+            return None
+            
+        try:
+            with self.lock:
+                # 等待帧头
+                while self.serial_port.read() != self.FRAME_HEADER:
+                    continue
+                
+                # 读取剩余数据
+                data = self.serial_port.read(self.FRAME_LENGTH - 1)
+                if len(data) != self.FRAME_LENGTH - 1:
+                    return None
+                
+                if data[-1] != ord(self.FRAME_TAIL):
+                    return None
+                
+                # 解析数据
+                cmd_type = data[0]
+                if cmd_type == self.CMD_TYPE_STATUS:
+                    yaw = struct.unpack('f', data[1:5])[0]
+                    pitch = struct.unpack('f', data[5:9])[0]
+                    
+                    return {
+                        'yaw': yaw,
+                        'pitch': pitch
+                    }
+                    
+                return None
+        except Exception as e:
+            self.last_error = str(e)
+            log_manager.error(f"接收状态数据失败: {e}")
+            return None
+    
+    def get_last_error(self):
+        """获取最后一次错误信息"""
+        return self.last_error
+    
+    def is_port_available(self):
+        """检查串口是否可用"""
+        try:
+            temp_port = serial.Serial(self.port)
+            temp_port.close()
+            return True
+        except:
+            return False
+    
+    def flush_buffers(self):
+        """清空串口缓冲区"""
+        if self.serial_port and self.serial_port.is_open:
+            self.serial_port.reset_input_buffer()
+            self.serial_port.reset_output_buffer()

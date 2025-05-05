@@ -3,667 +3,184 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智能工作环境监测系统</title>
-    <!-- 新UI样式 -->
+    <title>智能台灯监控系统</title>
     <link rel="stylesheet" href="/static/css/new-ui/base.css">
     <link rel="stylesheet" href="/static/css/new-ui/tabs.css">
-    <!-- 保留必要的原有样式 -->
-    <link rel="stylesheet" href="/static/css/fps_control.css">
 </head>
 <body>
     <div class="container">
-        <header class="main-header">
-            <h1>智能工作环境监测系统</h1>
-            <div class="system-info">
-                <span class="system-version">v1.0.0</span>
-                <div class="system-metrics">
-                    <div class="metric-item">
-                        <span class="metric-label">CPU:</span>
-                        <span id="cpuUsage" class="metric-value">-</span>
-                    </div>
-                    <div class="metric-item">
-                        <span class="metric-label">内存:</span>
-                        <span id="memoryUsage" class="metric-value">-</span>
-                    </div>
-                    <div class="metric-item">
-                        <span class="metric-label">运行时间:</span>
-                        <span id="systemUptime" class="metric-value">-</span>
-                    </div>
-                </div>
-            </div>
+        <header>
+            <h1>儿童智能台灯监控系统</h1>
+            <nav class="tabs-container" id="mainTabs" data-persistent="true">
+                <ul class="tabs-nav">
+                    <li class="tabs-nav-item"><a href="#overview" class="tabs-nav-link active" data-tab="overview">总览</a></li>
+                    <li class="tabs-nav-item"><a href="#posture" class="tabs-nav-link" data-tab="posture">坐姿监控</a></li>
+                    <li class="tabs-nav-item"><a href="#sitting" class="tabs-nav-link" data-tab="sitting">久坐监控</a></li>
+                    <li class="tabs-nav-item"><a href="#settings" class="tabs-nav-link" data-tab="settings">设置</a></li>
+                </ul>
+            </nav>
         </header>
 
-        <div id="mainTabs" class="tabs-container" data-persistent="true">
-            <ul class="tabs-nav">
-                <li class="tabs-nav-item">
-                    <a href="#" class="tabs-nav-link active" data-tab="overview">
-                        <i class="tabs-nav-icon">📊</i>概览监控
-                    </a>
-                </li>
-                <li class="tabs-nav-item">
-                    <a href="#" class="tabs-nav-link" data-tab="posture">
-                        <i class="tabs-nav-icon">🪑</i>坐姿分析
-                    </a>
-                </li>
-                <li class="tabs-nav-item">
-                    <a href="#" class="tabs-nav-link" data-tab="eyesight">
-                        <i class="tabs-nav-icon">👁️</i>视力保护
-                    </a>
-                </li>
-                <li class="tabs-nav-item">
-                    <a href="#" class="tabs-nav-link" data-tab="emotion">
-                        <i class="tabs-nav-icon">😊</i>情绪监测
-                    </a>
-                </li>
-                <li class="tabs-nav-item">
-                    <a href="#" class="tabs-nav-link" data-tab="serial">
-                        <i class="tabs-nav-icon">🔌</i>串口通信
-                    </a>
-                </li>
-                <li class="tabs-nav-item">
-                    <a href="#" class="tabs-nav-link" data-tab="settings">
-                        <i class="tabs-nav-icon">⚙️</i>系统设置
-                    </a>
-                </li>
-            </ul>
-
-            <!-- 标签页内容 -->
-            <div id="overview" class="tab-content active">
-                <div class="grid">
-                    <div class="card status-card">
-                        <div class="card-header">
-                            <h3 class="card-title">系统状态</h3>
-                        </div>
-                        <div class="card-content">
-                            <div class="status-item d-flex align-center">
-                                <span class="status-indicator"></span>
-                                <span id="systemStatusText">初始化中...</span>
+        <main>
+            <!-- 总览面板 -->
+            <section id="overview" class="tab-content active">
+                <div class="dashboard">
+                    <div class="status-card">
+                        <h3>实时状态</h3>
+                        <div id="current-status">
+                            <div class="status-item">
+                                <span class="label">坐姿状态:</span>
+                                <span id="posture-status" class="value status-indicator">正在检测...</span>
                             </div>
-                            <div class="status-item d-flex align-center mt-4">
-                                <span class="status-indicator"></span>
-                                <span id="dataProcessingStatus">数据处理: 待开始</span>
+                            <div class="status-item">
+                                <span class="label">已坐时间:</span>
+                                <span id="sitting-time" class="value">0分钟</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">头部角度:</span>
+                                <span id="head-angle" class="value">0°</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">系统状态:</span>
+                                <span id="system-status" class="value status-indicator">已连接</span>
                             </div>
                         </div>
                     </div>
-                    
-                    <div class="card metrics-card">
-                        <div class="card-header">
-                            <h3 class="card-title">实时指标</h3>
+
+                    <div class="chart-card">
+                        <h3>今日统计</h3>
+                        <div class="chart-container">
+                            <canvas id="daily-stats-chart"></canvas>
                         </div>
-                        <div class="card-content">
-                            <div class="metrics-grid grid">
-                                <div class="metric-item">
-                                    <div class="metric-label">坐姿状态</div>
-                                    <div id="postureStatus" class="metric-value">-</div>
-                                </div>
-                                <div class="metric-item">
-                                    <div class="metric-label">情绪状态</div>
-                                    <div id="emotionStatus" class="metric-value">-</div>
-                                </div>
-                                <div class="metric-item">
-                                    <div class="metric-label">专注度</div>
-                                    <div id="focusLevel" class="metric-value">-</div>
-                                </div>
-                            </div>
+                    </div>
+
+                    <div class="alert-card">
+                        <h3>提醒记录</h3>
+                        <div id="alerts-list" class="alerts-container">
+                            <!-- 提醒记录将通过JavaScript动态添加 -->
                         </div>
                     </div>
                 </div>
+            </section>
 
-                <div class="card video-card mt-4">
-                    <div class="card-header">
-                        <h3 class="card-title">实时监控</h3>
-                        <div class="card-actions">
-                            <button class="btn btn-primary" id="startAnalysisBtn">启动分析</button>
-                            <button class="btn btn-danger" id="stopAnalysisBtn" disabled>停止分析</button>
+            <!-- 坐姿监控面板 -->
+            <section id="posture" class="tab-content">
+                <div class="monitor-panel">
+                    <div class="video-container">
+                        <video id="posture-video" autoplay playsinline></video>
+                        <div class="video-overlay">
+                            <div id="posture-indicators"></div>
                         </div>
                     </div>
-                    <div class="card-content">
-                        <div class="video-feed">
-                            <img id="mainVideoFeed" src="/pose_video_feed" alt="实时视频流">
+                    <div class="analysis-panel">
+                        <h3>姿势分析</h3>
+                        <div id="posture-analysis">
+                            <div class="metric">
+                                <span class="label">当前姿势质量:</span>
+                                <span id="posture-quality" class="value">-</span>
+                            </div>
+                            <div class="metric">
+                                <span class="label">头部偏角:</span>
+                                <span id="head-angle-value" class="value">-</span>
+                            </div>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="posture-trend-chart"></canvas>
                         </div>
                     </div>
                 </div>
-            </div>
+            </section>
 
-            <!-- 其他标签页将通过AJAX动态加载 -->
-            <div id="posture" class="tab-content"></div>
-            <div id="eyesight" class="tab-content"></div>
-            <div id="emotion" class="tab-content"></div>
-            <div id="serial" class="tab-content"></div>
-            <div id="settings" class="tab-content"></div>
-        </div>
+            <!-- 久坐监控面板 -->
+            <section id="sitting" class="tab-content">
+                <div class="monitor-panel">
+                    <div class="status-panel">
+                        <h3>久坐监控</h3>
+                        <div id="sitting-analysis">
+                            <div class="metric">
+                                <span class="label">当前已坐时间:</span>
+                                <span id="current-sitting-time" class="value">-</span>
+                            </div>
+                            <div class="metric">
+                                <span class="label">上次休息时间:</span>
+                                <span id="last-break-time" class="value">-</span>
+                            </div>
+                            <div class="progress-container">
+                                <div class="progress-label">距离建议休息时间还有</div>
+                                <div class="progress-bar">
+                                    <div id="sitting-progress" class="progress"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="sitting-pattern-chart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 设置面板 -->
+            <section id="settings" class="tab-content">
+                <div class="settings-panel">
+                    <h3>监控设置</h3>
+                    <form id="monitor-settings">
+                        <div class="setting-group">
+                            <h4>坐姿监控</h4>
+                            <div class="setting-item">
+                                <label for="head-angle-threshold">头部角度阈值 (度)</label>
+                                <input type="number" id="head-angle-threshold" 
+                                       min="15" max="45" value="30">
+                            </div>
+                            <div class="setting-item">
+                                <label for="posture-warning-interval">坐姿警告间隔 (秒)</label>
+                                <input type="number" id="posture-warning-interval" 
+                                       min="30" max="300" value="60">
+                            </div>
+                        </div>
+                        
+                        <div class="setting-group">
+                            <h4>久坐监控</h4>
+                            <div class="setting-item">
+                                <label for="sitting-threshold">久坐时间阈值 (分钟)</label>
+                                <input type="number" id="sitting-threshold" 
+                                       min="15" max="120" value="30">
+                            </div>
+                            <div class="setting-item">
+                                <label for="break-duration">建议休息时长 (分钟)</label>
+                                <input type="number" id="break-duration" 
+                                       min="3" max="15" value="5">
+                            </div>
+                        </div>
+                        
+                        <div class="setting-group">
+                            <h4>通知设置</h4>
+                            <div class="setting-item">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="enable-voice" checked>
+                                    启用语音提醒
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="enable-light" checked>
+                                    启用灯光提醒
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="button-group">
+                            <button type="submit" class="primary">保存设置</button>
+                            <button type="button" class="secondary" id="reset-settings">重置默认</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+        </main>
     </div>
 
     <!-- JavaScript -->
-    <script src="/static/js/new-ui/tabs.js"></script>
     <script src="/static/js/new-ui/main.js"></script>
-    <script>
-        // 页面特定的初始化代码
-        function initializePosturePage() {
-            console.log('初始化坐姿分析页面');
-        }
-        
-        function initializeEmotionPage() {
-            console.log('初始化情绪监测页面');
-        }
-        
-        function initializeEyesightPage() {
-            console.log('初始化视力保护页面');
-        }
-        
-        function initializeSerialPage() {
-            console.log('初始化串口通信页面');
-        }
-        
-        function initializeSettingsPage() {
-            console.log('初始化系统设置页面');
-        }
-
-        // 刷新姿态数据
-        function refreshPostureData() {
-            fetch('/api/get_pose_result')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        // 更新概览页面的姿态数据
-                        updatePostureOverview(data.pose_data);
-                        
-                        // 如果姿态分析页面已初始化，也更新该页面
-                        if (document.getElementById('posture').hasChildNodes() && 
-                            !document.getElementById('posture').querySelector('.loading-indicator')) {
-                            updatePostureDetailsPage(data.pose_data);
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('获取姿态数据失败:', error);
-                });
-        }
-
-        // 更新概览页面的姿态信息
-        function updatePostureOverview(postureData) {
-            const overviewCard = document.querySelector('.overview-card[data-type="posture"]');
-            if (!overviewCard) return;
-            
-            // 更新姿态状态指示器
-            const statusIndicator = overviewCard.querySelector('.status-indicator');
-            const statusText = overviewCard.querySelector('.status-text');
-            
-            if (postureData.is_good_posture) {
-                statusIndicator.style.backgroundColor = 'var(--success-color)';
-                statusText.textContent = '姿态良好';
-            } else {
-                statusIndicator.style.backgroundColor = 'var(--warning-color)';
-                statusText.textContent = '姿态不良';
-            }
-            
-            // 更新姿态指标
-            const metrics = overviewCard.querySelectorAll('.metric');
-            if (metrics.length >= 3) {
-                // 假设顺序为：距离、角度、持续时间
-                metrics[0].querySelector('.metric-value').textContent = `${postureData.distance} cm`;
-                metrics[1].querySelector('.metric-value').textContent = `${postureData.angle}°`;
-                
-                // 格式化持续时间为分钟和秒
-                const durationMinutes = Math.floor(postureData.duration / 60);
-                const durationSeconds = postureData.duration % 60;
-                metrics[2].querySelector('.metric-value').textContent = 
-                    `${durationMinutes}分${durationSeconds}秒`;
-            }
-            
-            // 更新建议
-            const suggestionElement = overviewCard.querySelector('.card-suggestion');
-            if (suggestionElement) {
-                suggestionElement.textContent = postureData.suggestion || '保持良好坐姿，定期休息';
-            }
-        }
-
-        // 刷新情绪数据
-        function refreshEmotionData() {
-            fetch('/api/get_emotion_result')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        // 更新概览页面的情绪数据
-                        updateEmotionOverview(data.emotion_data);
-                        
-                        // 如果情绪分析页面已初始化，也更新该页面
-                        if (document.getElementById('emotion').hasChildNodes() && 
-                            !document.getElementById('emotion').querySelector('.loading-indicator')) {
-                            updateEmotionDetailsPage(data.emotion_data);
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('获取情绪数据失败:', error);
-                });
-        }
-
-        // 更新概览页面的情绪信息
-        function updateEmotionOverview(emotionData) {
-            const overviewCard = document.querySelector('.overview-card[data-type="emotion"]');
-            if (!overviewCard) return;
-            
-            // 更新情绪状态指示器
-            const statusIndicator = overviewCard.querySelector('.status-indicator');
-            const statusText = overviewCard.querySelector('.status-text');
-            
-            if (emotionData.current_emotion) {
-                // 根据当前情绪设置颜色
-                switch (emotionData.current_emotion) {
-                    case '高兴':
-                    case '平静':
-                        statusIndicator.style.backgroundColor = 'var(--success-color)';
-                        break;
-                    case '伤心':
-                    case '疲劳':
-                        statusIndicator.style.backgroundColor = 'var(--warning-color)';
-                        break;
-                    case '愤怒':
-                    case '紧张':
-                        statusIndicator.style.backgroundColor = 'var(--danger-color)';
-                        break;
-                    default:
-                        statusIndicator.style.backgroundColor = 'var(--medium-gray)';
-                }
-                
-                statusText.textContent = `当前：${emotionData.current_emotion}`;
-            }
-            
-            // 更新情绪指标
-            const metrics = overviewCard.querySelectorAll('.metric');
-            if (metrics.length >= 3 && emotionData.emotion_stats) {
-                // 假设前三个指标是：专注度、情绪稳定性、压力指数
-                metrics[0].querySelector('.metric-value').textContent = `${emotionData.emotion_stats.focus || 0}%`;
-                metrics[1].querySelector('.metric-value').textContent = `${emotionData.emotion_stats.stability || 0}%`;
-                metrics[2].querySelector('.metric-value').textContent = `${emotionData.emotion_stats.stress || 0}%`;
-            }
-            
-            // 更新建议
-            const suggestionElement = overviewCard.querySelector('.card-suggestion');
-            if (suggestionElement) {
-                suggestionElement.textContent = emotionData.suggestion || '保持心情愉快，适当休息';
-            }
-        }
-
-        // 刷新用眼健康数据
-        function refreshEyesightData() {
-            fetch('/api/get_eyesight_data')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        // 更新概览页面的用眼健康数据
-                        updateEyesightOverview(data.eyesight_data);
-                        
-                        // 如果用眼健康页面已初始化，也更新该页面
-                        if (document.getElementById('eyesight').hasChildNodes() && 
-                            !document.getElementById('eyesight').querySelector('.loading-indicator')) {
-                            updateEyesightDetailsPage(data.eyesight_data);
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('获取用眼健康数据失败:', error);
-                });
-        }
-
-        // 更新概览页面的用眼健康信息
-        function updateEyesightOverview(eyesightData) {
-            const overviewCard = document.querySelector('.overview-card[data-type="eyesight"]');
-            if (!overviewCard) return;
-            
-            // 更新用眼状态指示器
-            const statusIndicator = overviewCard.querySelector('.status-indicator');
-            const statusText = overviewCard.querySelector('.status-text');
-            
-            // 根据连续使用时间判断状态
-            if (eyesightData.continuous_usage_minutes <= 20) {
-                statusIndicator.style.backgroundColor = 'var(--success-color)';
-                statusText.textContent = '用眼健康';
-            } else if (eyesightData.continuous_usage_minutes <= 40) {
-                statusIndicator.style.backgroundColor = 'var(--warning-color)';
-                statusText.textContent = '需要休息';
-            } else {
-                statusIndicator.style.backgroundColor = 'var(--danger-color)';
-                statusText.textContent = '用眼过度';
-            }
-            
-            // 更新用眼指标
-            const metrics = overviewCard.querySelectorAll('.metric');
-            if (metrics.length >= 3) {
-                // 假设顺序为：连续使用、眨眼频率、屏幕亮度
-                metrics[0].querySelector('.metric-value').textContent = `${eyesightData.continuous_usage_minutes}分钟`;
-                metrics[1].querySelector('.metric-value').textContent = `${eyesightData.blink_rate_per_minute || 0}次/分钟`;
-                metrics[2].querySelector('.metric-value').textContent = `${eyesightData.screen_brightness || 0}%`;
-            }
-            
-            // 更新倒计时
-            const countdownElement = overviewCard.querySelector('.countdown');
-            if (countdownElement && eyesightData.next_break_seconds !== undefined) {
-                const minutes = Math.floor(eyesightData.next_break_seconds / 60);
-                const seconds = eyesightData.next_break_seconds % 60;
-                countdownElement.textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-                
-                // 如果时间少于5分钟，使用警告颜色
-                if (eyesightData.next_break_seconds < 300) {
-                    countdownElement.style.color = 'var(--warning-color)';
-                } else {
-                    countdownElement.style.color = 'var(--text-color)';
-                }
-            }
-            
-            // 更新建议
-            const suggestionElement = overviewCard.querySelector('.card-suggestion');
-            if (suggestionElement) {
-                suggestionElement.textContent = eyesightData.suggestion || 
-                    '请遵循20-20-20原则：每20分钟，看20英尺外的物体20秒';
-            }
-        }
-
-        // 数据刷新函数
-        function refreshPostureData() {
-            fetch('/api/get_pose_result')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        const result = data.pose_result;
-                        const postureStatus = document.getElementById('postureStatus');
-                        if (postureStatus) {
-                            postureStatus.textContent = result.posture || '-';
-                            
-                            // 根据状态设置颜色
-                            if (result.is_bad_posture) {
-                                postureStatus.className = 'metric-value danger';
-                            } else {
-                                postureStatus.className = 'metric-value normal';
-                            }
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('获取坐姿数据失败:', error);
-                });
-        }
-        
-        function refreshEmotionData() {
-            fetch('/api/get_emotion_result')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        const result = data.emotion_result;
-                        
-                        // 更新情绪状态
-                        const emotionStatus = document.getElementById('emotionStatus');
-                        if (emotionStatus) {
-                            emotionStatus.textContent = result.current_emotion || '-';
-                        }
-                        
-                        // 更新专注度
-                        const focusLevel = document.getElementById('focusLevel');
-                        if (focusLevel && result.focus_level !== undefined) {
-                            focusLevel.textContent = `${result.focus_level}%`;
-                            
-                            // 根据专注度设置颜色
-                            if (result.focus_level > 75) {
-                                focusLevel.className = 'metric-value normal';
-                            } else if (result.focus_level > 50) {
-                                focusLevel.className = 'metric-value warning';
-                            } else {
-                                focusLevel.className = 'metric-value danger';
-                            }
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('获取情绪数据失败:', error);
-                });
-        }
-        
-        function refreshEyesightData() {
-            fetch('/api/get_eyesight_data')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        // 这里暂时不更新任何内容，因为概览页面没有视力保护相关指标
-                    }
-                })
-                .catch(error => {
-                    console.error('获取视力保护数据失败:', error);
-                });
-        }
-
-        // 初始化系统控制按钮和事件处理
-        document.addEventListener('DOMContentLoaded', function() {
-            // 启动按钮事件
-            document.getElementById('startAnalysisBtn').addEventListener('click', function() {
-                fetch('/api/start_analysis', { method: 'POST' })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.status === 'success') {
-                            document.getElementById('systemStatusText').textContent = '系统运行中';
-                            document.getElementById('systemStatusText').previousElementSibling.style.backgroundColor = 'var(--success-color)';
-                            document.getElementById('startAnalysisBtn').disabled = true;
-                            document.getElementById('stopAnalysisBtn').disabled = false;
-                            
-                            // 刷新所有数据
-                            refreshPostureData();
-                            refreshEmotionData();
-                            refreshEyesightData();
-                        } else {
-                            showNotification(data.message || '启动系统失败', 'error');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('启动系统失败:', error);
-                        showNotification('启动系统失败，请重试', 'error');
-                    });
-            });
-            
-            // 停止按钮事件
-            document.getElementById('stopAnalysisBtn').addEventListener('click', function() {
-                fetch('/api/stop_analysis', { method: 'POST' })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.status === 'success') {
-                            document.getElementById('systemStatusText').textContent = '系统已停止';
-                            document.getElementById('systemStatusText').previousElementSibling.style.backgroundColor = 'var(--medium-gray)';
-                            document.getElementById('startAnalysisBtn').disabled = false;
-                            document.getElementById('stopAnalysisBtn').disabled = true;
-                        } else {
-                            showNotification(data.message || '停止系统失败', 'error');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('停止系统失败:', error);
-                        showNotification('停止系统失败，请重试', 'error');
-                    });
-            });
-            
-            // 标签页更改事件
-            document.getElementById('mainTabs').addEventListener('tabChange', function(e) {
-                const tabId = e.detail.tabId;
-                
-                // 如果不是概览标签页且内容为空，则动态加载
-                if (tabId !== 'overview') {
-                    const tabContent = document.getElementById(tabId);
-                    
-                    if (!tabContent.hasChildNodes()) {
-                        // 显示加载指示器
-                        tabContent.innerHTML = '<div class="loading-indicator">加载中...</div>';
-                        
-                        // 加载标签页内容
-                        fetch(`/new-ui/${tabId}`)
-                            .then(response => response.text())
-                            .then(html => {
-                                // 替换内容
-                                tabContent.innerHTML = html;
-                                
-                                // 执行特定初始化
-                                switch (tabId) {
-                                    case 'posture':
-                                        initializePosturePage();
-                                        break;
-                                    case 'emotion':
-                                        initializeEmotionPage();
-                                        break;
-                                    case 'eyesight':
-                                        initializeEyesightPage();
-                                        break;
-                                    case 'serial':
-                                        initializeSerialPage();
-                                        break;
-                                    case 'settings':
-                                        initializeSettingsPage();
-                                        break;
-                                }
-                            })
-                            .catch(error => {
-                                console.error(`加载${tabId}标签页失败:`, error);
-                                tabContent.innerHTML = `
-                                    <div class="error-message">
-                                        <h3>加载失败</h3>
-                                        <p>无法加载页面内容，请刷新重试。</p>
-                                        <button class="btn btn-primary" onclick="location.reload()">刷新页面</button>
-                                    </div>
-                                `;
-                            });
-                    }
-                }
-            });
-            
-            // 辅助函数 - 显示通知
-            function showNotification(message, type = 'info', duration = 5000) {
-                let container = document.getElementById('notificationContainer');
-                
-                if (!container) {
-                    container = document.createElement('div');
-                    container.id = 'notificationContainer';
-                    container.className = 'notification-container';
-                    document.body.appendChild(container);
-                }
-                
-                const notification = document.createElement('div');
-                notification.className = `notification ${type}`;
-                notification.textContent = message;
-                
-                container.appendChild(notification);
-                
-                // 自动移除通知
-                setTimeout(() => {
-                    notification.classList.add('hiding');
-                    setTimeout(() => {
-                        container.removeChild(notification);
-                        if (container.children.length === 0) {
-                            document.body.removeChild(container);
-                        }
-                    }, 300);
-                }, duration);
-            }
-            
-            // 定期刷新数据
-            setInterval(function() {
-                // 仅在系统运行时刷新数据
-                const isRunning = document.getElementById('stopAnalysisBtn') && 
-                                !document.getElementById('stopAnalysisBtn').disabled;
-                
-                if (isRunning) {
-                    refreshPostureData();
-                    refreshEmotionData();
-                    refreshEyesightData();
-                }
-            }, 1000);
-            
-            // 初始获取系统状态
-            updateSystemStatus();
-        });
-        
-        // 更新系统状态
-        function updateSystemStatus() {
-            fetch('/api/get_system_info')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        // 更新CPU和内存指标
-                        const systemInfo = data.system_info;
-                        
-                        if (systemInfo.cpu_usage !== undefined) {
-                            const cpuElement = document.getElementById('cpuUsage');
-                            if (cpuElement) {
-                                cpuElement.textContent = `${systemInfo.cpu_usage}%`;
-                                
-                                // 根据使用率设置颜色
-                                if (systemInfo.cpu_usage > 90) {
-                                    cpuElement.className = 'metric-value danger';
-                                } else if (systemInfo.cpu_usage > 70) {
-                                    cpuElement.className = 'metric-value warning';
-                                } else {
-                                    cpuElement.className = 'metric-value normal';
-                                }
-                            }
-                        }
-                        
-                        if (systemInfo.memory_usage && systemInfo.memory_usage.percent !== undefined) {
-                            const memElement = document.getElementById('memoryUsage');
-                            if (memElement) {
-                                memElement.textContent = `${systemInfo.memory_usage.percent}%`;
-                                
-                                // 根据使用率设置颜色
-                                if (systemInfo.memory_usage.percent > 90) {
-                                    memElement.className = 'metric-value danger';
-                                } else if (systemInfo.memory_usage.percent > 70) {
-                                    memElement.className = 'metric-value warning';
-                                } else {
-                                    memElement.className = 'metric-value normal';
-                                }
-                            }
-                        }
-                        
-                        // 更新版本和运行时间
-                        if (systemInfo.version) {
-                            document.querySelector('.system-version').textContent = `v${systemInfo.version}`;
-                        }
-                        
-                        if (systemInfo.uptime !== undefined) {
-                            const uptimeElement = document.getElementById('systemUptime');
-                            if (uptimeElement) {
-                                uptimeElement.textContent = formatUptime(systemInfo.uptime);
-                            }
-                        }
-                        
-                        // 更新系统运行状态
-                        if (systemInfo.monitoring_active === true) {
-                            document.getElementById('systemStatusText').textContent = '系统运行中';
-                            document.getElementById('systemStatusText').previousElementSibling.style.backgroundColor = 'var(--success-color)';
-                            document.getElementById('startAnalysisBtn').disabled = true;
-                            document.getElementById('stopAnalysisBtn').disabled = false;
-                        } else if (systemInfo.monitoring_active === false) {
-                            document.getElementById('systemStatusText').textContent = '系统已停止';
-                            document.getElementById('systemStatusText').previousElementSibling.style.backgroundColor = 'var(--medium-gray)';
-                            document.getElementById('startAnalysisBtn').disabled = false;
-                            document.getElementById('stopAnalysisBtn').disabled = true;
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('获取系统状态失败:', error);
-                });
-        }
-        
-        // 格式化运行时间
-        function formatUptime(seconds) {
-            const days = Math.floor(seconds / (24 * 60 * 60));
-            seconds %= (24 * 60 * 60);
-            const hours = Math.floor(seconds / (60 * 60));
-            seconds %= (60 * 60);
-            const minutes = Math.floor(seconds / 60);
-            
-            let result = '';
-            if (days > 0) result += `${days}天 `;
-            if (hours > 0 || days > 0) result += `${hours}小时 `;
-            result += `${minutes}分钟`;
-            
-            return result;
-        }
-    </script>
+    <script src="/static/js/new-ui/tabs.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </body>
 </html>

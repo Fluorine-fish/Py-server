@@ -7,6 +7,17 @@ import subprocess
 import struct
 
 class SerialHandler:
+    # Message Types
+    MSG_TYPE_CONTROL = 0xA0    # 控制指令 (上位机->下位机)
+    MSG_TYPE_STATUS = 0xB0     # 状态反馈 (下位机->上位机)
+    MSG_TYPE_ALERT = 0xA1      # 提醒指令 (上位机->下位机)
+    
+    # Alert Types
+    ALERT_NONE = 0x00          # 无提醒
+    ALERT_POSTURE = 0x01       # 坐姿提醒
+    ALERT_SITTING = 0x02       # 久坐提醒
+    ALERT_DISTANCE = 0x03      # 距离提醒
+
     def __init__(self, port=None, baudrate=115200, monitoring_interval=5, max_reconnect_attempts=3, reconnect_delay=2):
         self.port = port
         self.baudrate = baudrate
@@ -241,19 +252,22 @@ class SerialHandler:
         self.stop_monitoring()
         self.close()
 
-    def pack_frame(self, find_bool, yaw, pitch, type_byte=0xA0):
+    def pack_frame(self, find_bool, yaw, pitch, type_byte=MSG_TYPE_CONTROL):
         """
         按照上位机发送帧格式打包数据:
-        char start = 's';  //0 帧头取 's'
-        char type = 0xA0;  //1 消息类型：上->下：0xA0
-        char find_bool;    //2 是否追踪
-        float yaw;         //3-6 yaw数据
-        float pitch;       //7-10 pitch数据
-        char end = 'e';    //31 帧尾取'e'
+        char start = 's';    //0 帧头取 's'
+        char type;           //1 消息类型：0xA0(控制)/0xA1(提醒)
+        char find_bool;      //2 是否追踪
+        float yaw;          //3-6 yaw数据
+        float pitch;        //7-10 pitch数据
+        char alert_type;    //11 提醒类型
+        char alert_param;   //12 提醒参数
+        char reserved[18];  //13-30 保留
+        char end = 'e';     //31 帧尾取'e'
         """
         frame = bytearray(32)  # 创建32字节的数据帧
         frame[0] = ord('s')    # 帧头 's'
-        frame[1] = type_byte   # 消息类型 0xA0
+        frame[1] = type_byte   # 消息类型
         frame[2] = 1 if find_bool else 0  # 是否追踪
         
         # 打包 yaw (float, 4字节)，使用小端字节序
@@ -264,19 +278,49 @@ class SerialHandler:
         pitch_bytes = struct.pack('<f', float(pitch))
         frame[7:11] = pitch_bytes
         
+        # 如果是提醒消息，设置提醒类型和参数
+        if type_byte == self.MSG_TYPE_ALERT:
+            frame[11] = self.ALERT_NONE  # 默认无提醒
+            frame[12] = 0  # 默认参数
+            
         # 帧尾
         frame[31] = ord('e')
         
         return bytes(frame)
 
+    def pack_alert_frame(self, alert_type, alert_param=0):
+        """
+        打包提醒消息帧
+        alert_type: 提醒类型 (ALERT_POSTURE/ALERT_SITTING/ALERT_DISTANCE)
+        alert_param: 提醒参数，根据提醒类型不同而不同
+        """
+        frame = bytearray(32)
+        frame[0] = ord('s')  # 帧头
+        frame[1] = self.MSG_TYPE_ALERT  # 提醒消息类型
+        frame[11] = alert_type  # 提醒类型
+        frame[12] = alert_param  # 提醒参数
+        frame[31] = ord('e')  # 帧尾
+        return bytes(frame)
+
+    def send_alert(self, alert_type, alert_param=0):
+        """发送提醒消息到下位机"""
+        try:
+            frame = self.pack_alert_frame(alert_type, alert_param)
+            return self.send_data(frame)
+        except Exception as e:
+            print(f"发送提醒消息出错: {str(e)}")
+            return False
+
     def parse_frame(self, data):
         """
         解析下位机发送的帧数据:
-        char start = 's';  //0 帧头取 's'
-        char type = 0xB0;  //1 消息类型：下->上：0xB0
-        float yaw;         //2-5 yaw数据
-        float pitch;       //6-9 pitch数据
-        char end = 'e';    //31 帧尾取'e'
+        char start = 's';    //0 帧头取 's'
+        char type;           //1 消息类型：0xB0
+        float yaw;          //2-5 yaw数据
+        float pitch;        //6-9 pitch数据
+        char alert_status;  //10 提醒状态
+        char reserved[20];  //11-30 保留
+        char end = 'e';     //31 帧尾取'e'
         """
         if not isinstance(data, (bytes, bytearray)) or len(data) < 32:
             return None
@@ -285,17 +329,20 @@ class SerialHandler:
             return None  # 帧头或帧尾不匹配
             
         try:
-            msg_type = data[1]  # 消息类型，应为0xB0
+            msg_type = data[1]  # 消息类型
             
-            # 下位机帧没有find_bool字段，直接是yaw数据
             # 解析 yaw (2-5) 和 pitch (6-9)，使用小端字节序
             yaw = struct.unpack('<f', data[2:6])[0]
             pitch = struct.unpack('<f', data[6:10])[0]
             
+            # 解析提醒状态
+            alert_status = data[10] if len(data) > 10 else 0
+            
             return {
                 'type': msg_type,
                 'yaw': yaw,
-                'pitch': pitch
+                'pitch': pitch,
+                'alert_status': alert_status
             }
         except Exception as e:
             print(f"解析帧数据出错: {str(e)}")

@@ -959,3 +959,47 @@ def get_eyesight_data():
             'status': 'error',
             'message': str(e)
         })
+
+from flask import jsonify
+from modules.monitor_module import ChildMonitor
+from modules.serial_module import SerialCommunicationHandler
+
+# 初始化串口通信和监控器
+serial_handler = SerialCommunicationHandler()
+child_monitor = ChildMonitor(serial_handler)
+
+# ...existing code...
+
+@app.route('/api/monitor/status', methods=['GET'])
+def get_monitor_status():
+    """获取当前监控状态"""
+    monitor_data = child_monitor.get_statistics(time_range=1)  # 获取最近1小时的统计
+    return jsonify({
+        'status': 'success',
+        'data': monitor_data
+    })
+
+@app.route('/api/monitor/settings', methods=['POST'])
+def update_monitor_settings():
+    """更新监控设置"""
+    try:
+        data = request.get_json()
+        child_monitor.reconfigure(data)
+        return jsonify({
+            'status': 'success',
+            'message': '监控设置已更新'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 400
+
+@app.route('/api/monitor/reset', methods=['POST'])
+def reset_monitor():
+    """重置监控状态"""
+    child_monitor.reset_warnings()
+    return jsonify({
+        'status': 'success',
+        'message': '监控状态已重置'
+    })
