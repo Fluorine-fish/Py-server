@@ -13,7 +13,7 @@ def init_database():
         conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor()
         
-        # 创建数据表（如果不存在）
+        # 创建串口记录表（如果不存在）
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS serial_records (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -24,6 +24,44 @@ def init_database():
                 timestamp DATETIME(6)
             )
         """)
+
+        # 创建姿势记录表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS posture_records (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                timestamp DATETIME(6),
+                angle FLOAT,
+                posture_quality VARCHAR(20),
+                is_occluded BOOLEAN,
+                duration INT,
+                session_id VARCHAR(36)
+            )
+        """)
+
+        # 创建情绪记录表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS emotion_records (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                timestamp DATETIME(6),
+                emotion_type VARCHAR(20),
+                confidence FLOAT,
+                session_id VARCHAR(36)
+            )
+        """)
+
+        # 创建专注度记录表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS focus_records (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                timestamp DATETIME(6),
+                focus_score FLOAT,
+                posture_contribution FLOAT,
+                emotion_contribution FLOAT,
+                duration INT,
+                session_id VARCHAR(36)
+            )
+        """)
+
         conn.commit()
         cursor.close()
         conn.close()
@@ -136,3 +174,487 @@ def clear_history():
     except Exception as e:
         print(f"清空历史记录失败: {str(e)}")
         return False
+
+def save_posture_record(angle, posture_quality, is_occluded, duration, session_id=None):
+    """保存姿势记录到数据库"""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        sql = """INSERT INTO posture_records 
+                (timestamp, angle, posture_quality, is_occluded, duration, session_id) 
+                VALUES (%s, %s, %s, %s, %s, %s)"""
+        current_time = datetime.now(pytz.UTC)
+        values = (current_time, angle, posture_quality, is_occluded, duration, session_id)
+        
+        cursor.execute(sql, values)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"保存姿势记录失败: {str(e)}")
+        return False
+
+def save_emotion_record(emotion_type, confidence, session_id=None):
+    """保存情绪记录到数据库"""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        sql = """INSERT INTO emotion_records 
+                (timestamp, emotion_type, confidence, session_id) 
+                VALUES (%s, %s, %s, %s)"""
+        current_time = datetime.now(pytz.UTC)
+        values = (current_time, emotion_type, confidence, session_id)
+        
+        cursor.execute(sql, values)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"保存情绪记录失败: {str(e)}")
+        return False
+
+def save_focus_record(focus_score, posture_contribution, emotion_contribution, duration, session_id=None):
+    """保存专注度记录到数据库"""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        sql = """INSERT INTO focus_records 
+                (timestamp, focus_score, posture_contribution, emotion_contribution, duration, session_id) 
+                VALUES (%s, %s, %s, %s, %s, %s)"""
+        current_time = datetime.now(pytz.UTC)
+        values = (current_time, focus_score, posture_contribution, emotion_contribution, duration, session_id)
+        
+        cursor.execute(sql, values)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"保存专注度记录失败: {str(e)}")
+        return False
+
+def get_posture_stats(start_time=None, end_time=None, session_id=None):
+    """获取姿势分析统计数据"""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+        
+        where_clauses = []
+        params = []
+        
+        if start_time:
+            where_clauses.append("timestamp >= %s")
+            params.append(start_time)
+        if end_time:
+            where_clauses.append("timestamp <= %s")
+            params.append(end_time)
+        if session_id:
+            where_clauses.append("session_id = %s")
+            params.append(session_id)
+            
+        where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+        
+        # 获取总计统计
+        stats_sql = f"""
+            SELECT 
+                COUNT(*) as total_records,
+                AVG(angle) as avg_angle,
+                SUM(CASE WHEN posture_quality = 'good' THEN duration ELSE 0 END) as good_duration,
+                SUM(CASE WHEN posture_quality = 'bad' THEN duration ELSE 0 END) as bad_duration,
+                SUM(CASE WHEN is_occluded = 1 THEN duration ELSE 0 END) as occluded_duration
+            FROM posture_records
+            WHERE {where_sql}
+        """
+        cursor.execute(stats_sql, params)
+        stats = cursor.fetchone()
+        
+        # 获取时间趋势数据
+        trend_sql = f"""
+            SELECT 
+                DATE_FORMAT(timestamp, '%Y-%m-%d %H:00:00') as hour,
+                AVG(angle) as avg_angle,
+                COUNT(*) as count,
+                SUM(CASE WHEN posture_quality = 'good' THEN 1 ELSE 0 END) as good_count
+            FROM posture_records
+            WHERE {where_sql}
+            GROUP BY DATE_FORMAT(timestamp, '%Y-%m-%d %H:00:00')
+            ORDER BY hour DESC
+            LIMIT 24
+        """
+        cursor.execute(trend_sql, params)
+        trends = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            'stats': stats,
+            'trends': trends
+        }
+    except Exception as e:
+        print(f"获取姿势统计数据失败: {str(e)}")
+        return None
+
+def get_emotion_stats(start_time=None, end_time=None, session_id=None):
+    """获取情绪分析统计数据"""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+        
+        where_clauses = []
+        params = []
+        
+        if start_time:
+            where_clauses.append("timestamp >= %s")
+            params.append(start_time)
+        if end_time:
+            where_clauses.append("timestamp <= %s")
+            params.append(end_time)
+        if session_id:
+            where_clauses.append("session_id = %s")
+            params.append(session_id)
+            
+        where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+        
+        # 获取情绪分布统计
+        distribution_sql = f"""
+            SELECT 
+                emotion_type,
+                COUNT(*) as count,
+                AVG(confidence) as avg_confidence
+            FROM emotion_records
+            WHERE {where_sql}
+            GROUP BY emotion_type
+        """
+        cursor.execute(distribution_sql, params)
+        distribution = cursor.fetchall()
+        
+        # 获取情绪变化趋势
+        trend_sql = f"""
+            SELECT 
+                DATE_FORMAT(timestamp, '%Y-%m-%d %H:00:00') as hour,
+                emotion_type,
+                COUNT(*) as count
+            FROM emotion_records
+            WHERE {where_sql}
+            GROUP BY DATE_FORMAT(timestamp, '%Y-%m-%d %H:00:00'), emotion_type
+            ORDER BY hour DESC
+            LIMIT 24
+        """
+        cursor.execute(trend_sql, params)
+        trends = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            'distribution': distribution,
+            'trends': trends
+        }
+    except Exception as e:
+        print(f"获取情绪统计数据失败: {str(e)}")
+        return None
+
+from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, Boolean, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+Base = declarative_base()
+
+class PostureRecord(Base):
+    __tablename__ = 'posture_records'
+    
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    head_angle = Column(Float)  # 头部角度
+    posture_status = Column(String(20))  # good, bad, severe, occluded
+    detection_status = Column(String(20))  # detected, not_detected
+    duration = Column(Integer)  # 持续时间(秒)
+    
+class EmotionRecord(Base):
+    __tablename__ = 'emotion_records'
+    
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    emotion_type = Column(String(20))  # happy, sad, angry, neutral, focused
+    confidence = Column(Float)  # 置信度
+    mouth_ratio = Column(Float)  # 嘴部开合比
+    eye_ratio = Column(Float)  # 眼睛开合比
+    brow_ratio = Column(Float)  # 眉毛下压比
+    duration = Column(Integer)  # 持续时间(秒)
+
+class FocusRecord(Base):
+    __tablename__ = 'focus_records'
+    
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    focus_score = Column(Float)  # 0-100的专注度得分
+    posture_factor = Column(Float)  # 姿势对专注度的影响因子
+    emotion_factor = Column(Float)  # 情绪对专注度的影响因子
+    duration = Column(Integer)  # 持续时间(秒)
+
+class EyesightRecord(Base):
+    __tablename__ = 'eyesight_records'
+    
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    screen_distance = Column(Float)  # 屏幕距离(厘米)
+    ambient_light = Column(Float)  # 环境光照强度(lux)
+    blink_rate = Column(Float)  # 眨眼频率(次/分钟)
+    usage_duration = Column(Integer)  # 用眼时长(秒)
+    break_taken = Column(Boolean)  # 是否已休息
+    warning_count = Column(Integer)  # 警告次数
+
+class ChildProfile(Base):
+    __tablename__ = 'child_profiles'
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50))
+    age = Column(Integer)
+    height = Column(Float)  # 身高(cm)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # 阅读习惯设置
+    preferred_distance = Column(Float)  # 建议阅读距离(cm)
+    max_continuous_time = Column(Integer)  # 最长连续阅读时间(分钟)
+    break_duration = Column(Integer)  # 建议休息时长(分钟)
+
+class DeviceConfig(Base):
+    __tablename__ = 'device_configs'
+    
+    id = Column(Integer, primary_key=True)
+    device_id = Column(String(50), unique=True)  # 设备唯一标识
+    name = Column(String(50))  # 设备名称
+    child_id = Column(Integer, ForeignKey('child_profiles.id'))  # 关联的儿童ID
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # 设备参数
+    brightness = Column(Integer)  # 亮度设置(0-100)
+    color_temp = Column(Integer)  # 色温设置(2700-6500K)
+    auto_adjust = Column(Boolean, default=True)  # 是否自动调节
+    camera_enabled = Column(Boolean, default=True)  # 摄像头是否启用
+    notification_enabled = Column(Boolean, default=True)  # 通知是否启用
+
+class NotificationSettings(Base):
+    __tablename__ = 'notification_settings'
+    
+    id = Column(Integer, primary_key=True)
+    device_id = Column(Integer, ForeignKey('device_configs.id'))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # 通知设置
+    distance_warning = Column(Boolean, default=True)  # 距离警告
+    posture_warning = Column(Boolean, default=True)  # 姿势警告
+    time_warning = Column(Boolean, default=True)  # 时间警告
+    light_warning = Column(Boolean, default=True)  # 光线警告
+    
+    # 通知阈值
+    continuous_time_threshold = Column(Integer, default=30)  # 连续使用时间阈值(分钟)
+    distance_threshold = Column(Float, default=33.0)  # 距离警告阈值(cm)
+    light_threshold_min = Column(Integer, default=300)  # 最低照度阈值(lux)
+    light_threshold_max = Column(Integer, default=750)  # 最高照度阈值(lux)
+    
+    # 通知方式
+    email_notify = Column(Boolean, default=False)  # 邮件通知
+    web_notify = Column(Boolean, default=True)  # 网页通知
+    email_address = Column(String(100))  # 通知邮箱
+
+def init_db(db_url='sqlite:///posture_emotion.db'):
+    """初始化数据库"""
+    engine = create_engine(db_url)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    return Session()
+
+class DatabaseManager:
+    def __init__(self, session):
+        self.session = session
+    
+    def add_posture_record(self, head_angle, posture_status, detection_status, duration):
+        record = PostureRecord(
+            head_angle=head_angle,
+            posture_status=posture_status,
+            detection_status=detection_status,
+            duration=duration
+        )
+        self.session.add(record)
+        self.session.commit()
+    
+    def add_emotion_record(self, emotion_type, confidence, mouth_ratio, eye_ratio, brow_ratio, duration):
+        record = EmotionRecord(
+            emotion_type=emotion_type,
+            confidence=confidence,
+            mouth_ratio=mouth_ratio,
+            eye_ratio=eye_ratio,
+            brow_ratio=brow_ratio,
+            duration=duration
+        )
+        self.session.add(record)
+        self.session.commit()
+    
+    def add_focus_record(self, focus_score, posture_factor, emotion_factor, duration):
+        record = FocusRecord(
+            focus_score=focus_score,
+            posture_factor=posture_factor,
+            emotion_factor=emotion_factor,
+            duration=duration
+        )
+        self.session.add(record)
+        self.session.commit()
+    
+    def add_eyesight_record(self, screen_distance, ambient_light, blink_rate, usage_duration, break_taken, warning_count):
+        record = EyesightRecord(
+            screen_distance=screen_distance,
+            ambient_light=ambient_light,
+            blink_rate=blink_rate,
+            usage_duration=usage_duration,
+            break_taken=break_taken,
+            warning_count=warning_count
+        )
+        self.session.add(record)
+        self.session.commit()
+    
+    def get_posture_stats(self, start_time=None, end_time=None):
+        """获取姿势统计数据"""
+        query = self.session.query(PostureRecord)
+        if start_time:
+            query = query.filter(PostureRecord.timestamp >= start_time)
+        if end_time:
+            query = query.filter(PostureRecord.timestamp <= end_time)
+        return query.all()
+    
+    def get_emotion_stats(self, start_time=None, end_time=None):
+        """获取情绪统计数据"""
+        query = self.session.query(EmotionRecord)
+        if start_time:
+            query = query.filter(EmotionRecord.timestamp >= start_time)
+        if end_time:
+            query = query.filter(EmotionRecord.timestamp <= end_time)
+        return query.all()
+    
+    def get_focus_stats(self, start_time=None, end_time=None):
+        """获取专注度统计数据"""
+        query = self.session.query(FocusRecord)
+        if start_time:
+            query = query.filter(FocusRecord.timestamp >= start_time)
+        if end_time:
+            query = query.filter(FocusRecord.timestamp <= end_time)
+        return query.all()
+    
+    def get_eyesight_stats(self, start_time=None, end_time=None):
+        """获取用眼健康统计数据"""
+        query = self.session.query(EyesightRecord)
+        if start_time:
+            query = query.filter(EyesightRecord.timestamp >= start_time)
+        if end_time:
+            query = query.filter(EyesightRecord.timestamp <= end_time)
+        return query.all()
+    
+    def clear_old_records(self, days_to_keep=30):
+        """清理旧记录"""
+        cutoff_date = datetime.utcnow() - timedelta(days=days_to_keep)
+        
+        self.session.query(PostureRecord).filter(PostureRecord.timestamp < cutoff_date).delete()
+        self.session.query(EmotionRecord).filter(EmotionRecord.timestamp < cutoff_date).delete()
+        self.session.query(FocusRecord).filter(FocusRecord.timestamp < cutoff_date).delete()
+        self.session.query(EyesightRecord).filter(EyesightRecord.timestamp < cutoff_date).delete()
+        
+        self.session.commit()
+
+# 更新 DatabaseManager 类以添加新的管理方法
+def add_child_profile_methods(manager_class):
+    def add_child(self, name, age, height):
+        child = ChildProfile(name=name, age=age, height=height)
+        self.session.add(child)
+        self.session.commit()
+        return child
+        
+    def update_child(self, child_id, **kwargs):
+        child = self.session.query(ChildProfile).get(child_id)
+        if child:
+            for key, value in kwargs.items():
+                if hasattr(child, key):
+                    setattr(child, key, value)
+            self.session.commit()
+            return child
+        return None
+        
+    def get_child(self, child_id):
+        return self.session.query(ChildProfile).get(child_id)
+        
+    def get_all_children(self):
+        return self.session.query(ChildProfile).all()
+        
+    manager_class.add_child = add_child
+    manager_class.update_child = update_child
+    manager_class.get_child = get_child
+    manager_class.get_all_children = get_all_children
+    return manager_class
+
+def add_device_config_methods(manager_class):
+    def add_device(self, device_id, name, child_id=None):
+        device = DeviceConfig(device_id=device_id, name=name, child_id=child_id)
+        self.session.add(device)
+        self.session.commit()
+        return device
+        
+    def update_device(self, device_id, **kwargs):
+        device = self.session.query(DeviceConfig).filter_by(device_id=device_id).first()
+        if device:
+            for key, value in kwargs.items():
+                if hasattr(device, key):
+                    setattr(device, key, value)
+            self.session.commit()
+            return device
+        return None
+        
+    def get_device(self, device_id):
+        return self.session.query(DeviceConfig).filter_by(device_id=device_id).first()
+        
+    def get_all_devices(self):
+        return self.session.query(DeviceConfig).all()
+        
+    manager_class.add_device = add_device
+    manager_class.update_device = update_device
+    manager_class.get_device = get_device
+    manager_class.get_all_devices = get_all_devices
+    return manager_class
+
+def add_notification_methods(manager_class):
+    def add_notification_settings(self, device_id):
+        settings = NotificationSettings(device_id=device_id)
+        self.session.add(settings)
+        self.session.commit()
+        return settings
+        
+    def update_notification_settings(self, device_id, **kwargs):
+        settings = self.session.query(NotificationSettings).filter_by(device_id=device_id).first()
+        if settings:
+            for key, value in kwargs.items():
+                if hasattr(settings, key):
+                    setattr(settings, key, value)
+            self.session.commit()
+            return settings
+        return None
+        
+    def get_notification_settings(self, device_id):
+        return self.session.query(NotificationSettings).filter_by(device_id=device_id).first()
+        
+    manager_class.add_notification_settings = add_notification_settings
+    manager_class.update_notification_settings = update_notification_settings
+    manager_class.get_notification_settings = get_notification_settings
+    return manager_class
+
+# 使用装饰器添加新方法到DatabaseManager类
+DatabaseManager = add_child_profile_methods(DatabaseManager)
+DatabaseManager = add_device_config_methods(DatabaseManager)
+DatabaseManager = add_notification_methods(DatabaseManager)

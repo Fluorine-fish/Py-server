@@ -1,12 +1,15 @@
 """
 路由模块 - 处理所有API路由请求
 """
-from flask import Blueprint, render_template, jsonify, request, Response, stream_with_context
+from flask import Blueprint, render_template, jsonify, request, Response, stream_with_context, send_file
 import json
 import queue
 import time
 from modules.database_module import save_record_to_db, get_history_records, clear_history
 from modules.posture_module import WebPostureMonitor, posture_params
+from modules.database_module import get_posture_stats, get_emotion_stats
+from datetime import datetime, timedelta
+import os
 
 # 创建蓝图
 routes_bp = Blueprint('routes', __name__)
@@ -644,3 +647,412 @@ def set_resolution_mode():
 def get_pose_status_compat():
     """获取姿势状态的兼容路由（无API前缀）"""
     return get_pose_status()
+
+# 新 UI 路由 - 主页面
+@routes_bp.route('/new-ui')
+def new_ui_index():
+    """新的 UI 界面主页面"""
+    return render_template('new-main/index.html')
+
+# 新 UI 路由 - 坐姿分析页面
+@routes_bp.route('/new-ui/posture')
+def new_ui_posture():
+    """新的 UI 界面坐姿分析页面"""
+    return render_template('new_UI/sitds.html')
+
+# 新 UI 路由 - 视力保护页面
+@routes_bp.route('/new-ui/eyesight')
+def new_ui_eyesight():
+    """新的 UI 界面视力保护页面"""
+    return render_template('new_UI/eyesight.html')
+
+# 新 UI 路由 - 情绪分析页面
+@routes_bp.route('/new-ui/emotion')
+def new_ui_emotion():
+    """新的 UI 界面情绪分析页面"""
+    return render_template('new_UI/emotionds.html')
+
+# 新 UI 路由 - 获取所有传感器数据 API
+@routes_bp.route('/api/get_all_sensors_data')
+def get_all_sensors_data():
+    """获取所有传感器的当前数据"""
+    global posture_monitor
+    
+    try:
+        # 示例数据结构，未来将从真实数据源获取
+        data = {
+            'status': 'success',
+            'timestamp': time.time(),
+            'posture': {
+                'status': 'good',
+                'angle': 15.3,
+                'is_bad_posture': False,
+                'good_time_percentage': 64,
+                'bad_time_percentage': 36
+            },
+            'eyesight': {
+                'light_level': 850,
+                'light_quality': 'good',
+                'screen_time': 45,  # 当前连续盯屏时间(分钟)
+                'blink_rate': 15    # 眨眼频率(次/分钟)
+            },
+            'emotion': {
+                'current': 'focused',
+                'confidence': 0.85,
+                'history': [
+                    {'emotion': 'focused', 'duration': 15},
+                    {'emotion': 'happy', 'duration': 5},
+                    {'emotion': 'focused', 'duration': 25}
+                ]
+            },
+            'focus': {
+                'score': 78,
+                'trend': 'stable',
+                'session_duration': 65  # 当前专注时长(分钟)
+            }
+        }
+        
+        # 如果姿势监控模块可用，使用真实数据
+        if posture_monitor and posture_monitor.is_running:
+            pose_data = posture_monitor.pose_result
+            emotion_data = posture_monitor.emotion_result
+            
+            if pose_data:
+                data['posture']['status'] = 'good' if not pose_data.get('is_bad_posture') else 'bad'
+                data['posture']['angle'] = pose_data.get('angle', 0)
+                data['posture']['is_bad_posture'] = pose_data.get('is_bad_posture', False)
+                
+            if emotion_data:
+                emotion_code = emotion_data.get('emotion_code', -1)
+                emotion_map = {
+                    0: 'neutral',
+                    1: 'happy',
+                    2: 'sad',
+                    3: 'angry',
+                    4: 'afraid',
+                    5: 'surprised',
+                    6: 'disgusted',
+                    7: 'confused',
+                    8: 'focused'
+                }
+                data['emotion']['current'] = emotion_map.get(emotion_code, 'unknown')
+                data['emotion']['confidence'] = emotion_data.get('confidence', 0)
+        
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'获取传感器数据失败: {str(e)}'
+        })
+
+@routes_bp.route('/api/posture/stats')
+def get_posture_statistics():
+    """获取姿势分析统计数据"""
+    try:
+        # 获取查询参数
+        period = request.args.get('period', 'day')  # day, week, month
+        now = datetime.now()
+        
+        if period == 'week':
+            start_time = now - timedelta(days=7)
+        elif period == 'month':
+            start_time = now - timedelta(days=30)
+        else:  # day
+            start_time = now - timedelta(days=1)
+        
+        stats = get_posture_stats(start_time=start_time)
+        if stats:
+            return jsonify({
+                'status': 'success',
+                'data': stats
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': '获取统计数据失败'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'处理请求时出错: {str(e)}'
+        }), 500
+
+@routes_bp.route('/api/emotion/stats')
+def get_emotion_statistics():
+    """获取情绪分析统计数据"""
+    try:
+        # 获取查询参数
+        period = request.args.get('period', 'day')  # day, week, month
+        now = datetime.now()
+        
+        if period == 'week':
+            start_time = now - timedelta(days=7)
+        elif period == 'month':
+            start_time = now - timedelta(days=30)
+        else:  # day
+            start_time = now - timedelta(days=1)
+        
+        stats = get_emotion_stats(start_time=start_time)
+        if stats:
+            return jsonify({
+                'status': 'success',
+                'data': stats
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': '获取统计数据失败'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'处理请求时出错: {str(e)}'
+        }), 500
+
+@routes_bp.route('/api/focus/stats')
+def get_focus_statistics():
+    """获取专注度统计数据"""
+    try:
+        if not posture_monitor or not posture_monitor.is_running:
+            return jsonify({
+                'status': 'error',
+                'message': '姿势分析系统未运行'
+            }), 400
+        
+        # 获取当前会话ID的统计数据
+        session_id = posture_monitor.session_id
+        now = datetime.now()
+        start_time = now - timedelta(hours=1)  # 获取最近一小时的数据
+        
+        # 查询数据库获取统计信息
+        query = """
+            SELECT 
+                AVG(focus_score) as avg_focus,
+                MAX(focus_score) as max_focus,
+                MIN(focus_score) as min_focus,
+                SUM(duration) as total_duration
+            FROM focus_records
+            WHERE session_id = %s AND timestamp >= %s
+        """
+        
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(query, (session_id, start_time))
+        stats = cursor.fetchone()
+        
+        # 获取专注度趋势
+        trend_query = """
+            SELECT timestamp, focus_score
+            FROM focus_records
+            WHERE session_id = %s AND timestamp >= %s
+            ORDER BY timestamp DESC
+            LIMIT 60
+        """
+        cursor.execute(trend_query, (session_id, start_time))
+        trends = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'current_session': {
+                    'avg_focus': round(stats['avg_focus'], 2) if stats['avg_focus'] else 0,
+                    'max_focus': round(stats['max_focus'], 2) if stats['max_focus'] else 0,
+                    'min_focus': round(stats['min_focus'], 2) if stats['min_focus'] else 0,
+                    'total_duration': stats['total_duration'] if stats['total_duration'] else 0
+                },
+                'trends': trends
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'处理请求时出错: {str(e)}'
+        }), 500
+
+def register_routes(app, video_stream, db_manager, suggestion_generator, report_generator):
+    @app.route('/api/suggestions', methods=['GET'])
+    def get_suggestions():
+        """获取综合建议"""
+        try:
+            suggestions = suggestion_generator.generate_comprehensive_suggestions()
+            return jsonify({
+                'status': 'success',
+                'suggestions': suggestions
+            })
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            })
+
+    @app.route('/api/recording/start', methods=['POST'])
+    def start_recording():
+        """开始录制"""
+        try:
+            if video_stream.start_recording():
+                return jsonify({
+                    'status': 'success',
+                    'message': '开始录制'
+                })
+            return jsonify({
+                'status': 'error',
+                'message': '无法开始录制'
+            })
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            })
+
+    @app.route('/api/recording/stop', methods=['POST'])
+    def stop_recording():
+        """停止录制"""
+        try:
+            if video_stream.stop_recording():
+                return jsonify({
+                    'status': 'success',
+                    'message': '停止录制'
+                })
+            return jsonify({
+                'status': 'error',
+                'message': '无法停止录制'
+            })
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            })
+
+    @app.route('/api/recording/status', methods=['GET'])
+    def get_recording_status():
+        """获取录制状态"""
+        try:
+            status = video_stream.get_recording_status()
+            return jsonify({
+                'status': 'success',
+                'recording_status': status
+            })
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            })
+
+    @app.route('/api/report/daily', methods=['GET'])
+    def generate_daily_report():
+        """生成日报"""
+        try:
+            date_str = request.args.get('date')
+            if date_str:
+                date = datetime.strptime(date_str, '%Y-%m-%d')
+            else:
+                date = datetime.now()
+                
+            filepath = report_generator.generate_daily_report(date)
+            return send_file(filepath, as_attachment=True)
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            })
+
+    @app.route('/api/report/weekly', methods=['GET'])
+    def generate_weekly_report():
+        """生成周报"""
+        try:
+            date_str = request.args.get('date')
+            if date_str:
+                date = datetime.strptime(date_str, '%Y-%m-%d')
+            else:
+                date = datetime.now()
+                
+            filepath = report_generator.generate_weekly_report(date)
+            return send_file(filepath, as_attachment=True)
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            })
+
+    @app.route('/api/stats/posture', methods=['GET'])
+    def get_posture_stats():
+        """获取姿势统计数据"""
+        try:
+            start_time = _parse_time_param(request.args.get('start_time'))
+            end_time = _parse_time_param(request.args.get('end_time'))
+            stats = db_manager.get_posture_stats(start_time, end_time)
+            return jsonify({
+                'status': 'success',
+                'stats': stats
+            })
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            })
+
+    @app.route('/api/stats/emotion', methods=['GET'])
+    def get_emotion_stats():
+        """获取情绪统计数据"""
+        try:
+            start_time = _parse_time_param(request.args.get('start_time'))
+            end_time = _parse_time_param(request.args.get('end_time'))
+            stats = db_manager.get_emotion_stats(start_time, end_time)
+            return jsonify({
+                'status': 'success',
+                'stats': stats
+            })
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            })
+
+    @app.route('/api/stats/focus', methods=['GET'])
+    def get_focus_stats():
+        """获取专注度统计数据"""
+        try:
+            start_time = _parse_time_param(request.args.get('start_time'))
+            end_time = _parse_time_param(request.args.get('end_time'))
+            stats = db_manager.get_focus_stats(start_time, end_time)
+            return jsonify({
+                'status': 'success',
+                'stats': stats
+            })
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            })
+
+    @app.route('/api/stats/eyesight', methods=['GET'])
+    def get_eyesight_stats():
+        """获取用眼健康统计数据"""
+        try:
+            start_time = _parse_time_param(request.args.get('start_time'))
+            end_time = _parse_time_param(request.args.get('end_time'))
+            stats = db_manager.get_eyesight_stats(start_time, end_time)
+            return jsonify({
+                'status': 'success',
+                'stats': stats
+            })
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            })
+
+def _parse_time_param(time_str):
+    """解析时间参数"""
+    if not time_str:
+        return None
+    try:
+        return datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+    except:
+        return None

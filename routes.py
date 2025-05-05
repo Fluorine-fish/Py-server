@@ -14,6 +14,7 @@ from db_handler import DBHandler
 from modules.video_stream_module import VideoStreamHandler
 from modules.posture_module import WebPostureMonitor, POSTURE_MODULE_AVAILABLE
 from serial_handler import SerialHandler
+import psutil
 
 # 创建数据库处理器
 db = DBHandler(DB_CONFIG)
@@ -164,21 +165,45 @@ def get_pose_result():
     """获取姿势分析结果"""
     try:
         if not posture_monitor.is_running:
+            # 当监测未运行时，返回模拟数据用于UI开发
+            mock_data = {
+                "posture": "良好",
+                "head_angle": 12.5,
+                "score": 85,
+                "duration": 1800,  # 良好姿势保持时间（秒）
+                "is_bad_posture": False,
+                "statistics": {
+                    "good_time": 5400,   # 良好姿势时间（秒）
+                    "bad_time": 1800,    # 不良姿势时间（秒）
+                    "severe_time": 600,  # 严重不良姿势时间（秒）
+                    "total_time": 7800   # 总监测时间（秒）
+                },
+                "advice": [
+                    {
+                        "type": "info",
+                        "message": "当前姿势良好，请继续保持"
+                    },
+                    {
+                        "type": "warning",
+                        "message": "建议每小时起身活动5分钟"
+                    }
+                ]
+            }
             return jsonify({
-                'status': 'error',
-                'message': '姿势监测未启动'
+                "status": "success",
+                "pose_result": mock_data
             })
         
         result = posture_monitor.pose_result
         return jsonify({
-            'status': 'success',
-            'pose_result': result
+            "status": "success",
+            "pose_result": result
         })
     except Exception as e:
         print(f"获取姿势分析结果出错: {str(e)}")
         return jsonify({
-            'status': 'error',
-            'message': f"获取姿势分析结果失败: {str(e)}"
+            "status": "error",
+            "message": f"获取姿势分析结果失败: {str(e)}"
         })
 
 @routes.route('/api/get_emotion_result')
@@ -186,9 +211,41 @@ def get_emotion_result():
     """获取情绪分析结果"""
     try:
         if not posture_monitor.is_running:
+            # 当监测未运行时，返回模拟数据用于UI开发
+            mock_data = {
+                'current_emotion': '专注',
+                'focus_level': 85,  # 专注度
+                'stress_level': 20,  # 压力水平
+                'fatigue_level': 15,  # 疲劳度
+                'emotion_distribution': {
+                    'focused': 65,
+                    'relaxed': 25,
+                    'tired': 5,
+                    'stressed': 5
+                },
+                'focus_trend': [
+                    {'time': time.time() - 3600, 'value': 75},
+                    {'time': time.time() - 2700, 'value': 80},
+                    {'time': time.time() - 1800, 'value': 85},
+                    {'time': time.time() - 900, 'value': 90},
+                    {'time': time.time(), 'value': 85}
+                ],
+                'analysis': {
+                    'summary': '当前状态良好，专注度高，压力低，适合继续工作。',
+                    'details': [
+                        {'type': 'positive', 'content': '专注度保持稳定，近一小时内有小幅提升。'},
+                        {'type': 'neutral', 'content': '轻微疲劳迹象开始显现，但尚在可接受范围内。'}
+                    ],
+                    'suggestions': [
+                        '继续保持当前工作状态',
+                        '建议30分钟后短暂休息5分钟',
+                        '多喝水有助于保持清醒'
+                    ]
+                }
+            }
             return jsonify({
-                'status': 'error',
-                'message': '姿势监测未启动'
+                'status': 'success',
+                'emotion_result': mock_data
             })
         
         result = posture_monitor.emotion_result
@@ -772,4 +829,133 @@ def send_data():
         return jsonify({
             'status': 'error',
             'message': f"发送数据失败: {str(e)}"
+        })
+    except Exception as e:
+        print(f"获取系统信息出错: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f"获取系统信息失败: {str(e)}"
+        })
+
+from flask import render_template, jsonify, Response, request, Blueprint, current_app
+
+routes_bp = Blueprint('routes', __name__)
+
+# 现有路由保持不变...
+
+# 新UI路由
+@routes_bp.route('/new-ui/')
+def new_ui_index():
+    """新的UI主页"""
+    return render_template('new-main/index.html')
+
+@routes_bp.route('/new-ui/posture')
+def new_ui_posture():
+    """坐姿分析页面"""
+    return render_template('new_UI/sitds.html')
+
+@routes_bp.route('/new-ui/eyesight')
+def new_ui_eyesight():
+    """视力保护页面"""
+    return render_template('new_UI/eyesight.html')
+
+@routes_bp.route('/new-ui/emotion')
+def new_ui_emotion():
+    """情绪监测页面"""
+    return render_template('new_UI/emotionds.html')
+
+@routes_bp.route('/new-ui/settings')
+def new_ui_settings():
+    """设置页面"""
+    return render_template('new-main/settings.html')
+
+@routes_bp.route('/new-ui/serial')
+def new_ui_serial():
+    """串口通信页面"""
+    return render_template('new-main/serial.html')
+
+# API路由
+@routes_bp.route('/api/start_analysis', methods=['POST'])
+def start_analysis():
+    """启动分析系统"""
+    try:
+        # TODO: 实现系统启动逻辑
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@routes_bp.route('/api/stop_analysis', methods=['POST'])
+def stop_analysis():
+    """停止分析系统"""
+    try:
+        # TODO: 实现系统停止逻辑
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+import psutil
+import time
+from flask import Response, Blueprint, render_template, jsonify, request
+
+# Create API endpoints for the new UI
+@routes.route('/api/get_eyesight_data')
+def get_eyesight_data():
+    """获取视力保护相关数据"""
+    try:
+        # Mock data for eyesight protection module
+        data = {
+            'status': 'success',
+            'environment': {
+                'light_level': 500,  # 光照强度(lux)
+                'light_status': 'good',
+                'screen_distance': 60,  # 屏幕距离(cm)
+                'distance_status': 'good',
+                'blink_rate': 15,  # 眨眼频率(次/分钟)
+                'blink_status': 'good'
+            },
+            'status_info': {
+                'light': {
+                    'type': 'good',
+                    'message': '当前光线适中'
+                },
+                'distance': {
+                    'type': 'good',
+                    'message': '保持良好距离'
+                },
+                'usage_time': {
+                    'type': 'warning',
+                    'message': '已持续用眼45分钟，建议休息'
+                }
+            },
+            'statistics': {
+                'usage_distribution': {
+                    'good': 120,
+                    'normal': 60,
+                    'tired': 30,
+                    'excessive': 15
+                },
+                'light_trend': [
+                    {'time': time.time() - 3600, 'value': 450},
+                    {'time': time.time() - 1800, 'value': 500},
+                    {'time': time.time(), 'value': 550}
+                ]
+            },
+            'advice': [
+                {
+                    'type': 'warning',
+                    'title': '建议休息提醒',
+                    'content': '您已连续用眼45分钟，建议休息5-10分钟，做些眼保健操。'
+                },
+                {
+                    'type': 'info',
+                    'title': '光照建议',
+                    'content': '当前光照环境良好，建议保持。'
+                }
+            ]
+        }
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
         })

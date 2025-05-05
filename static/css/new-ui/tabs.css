@@ -1,0 +1,117 @@
+/* 
+ * Tab Navigation Component - Modern Design System
+ * For Smart Working Environment Monitoring System
+ */
+
+.tabs-container {
+    width: 100%;
+    margin-bottom: var(--spacing-md);
+}
+
+.tabs-nav {
+    display: flex;
+    list-style: none;
+    border-bottom: var(--border-width) solid var(--border-color);
+    margin-bottom: var(--spacing-lg);
+    overflow-x: auto;
+    scrollbar-width: none; /* Firefox */
+    gap: 2px;
+}
+
+.tabs-nav::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Edge */
+}
+
+.tabs-nav-item {
+    position: relative;
+    margin-right: var(--spacing-md);
+}
+
+.tabs-nav-link {
+    display: flex;
+    align-items: center;
+    padding: var(--spacing-md) var(--spacing-sm);
+    color: var(--medium-gray);
+    font-weight: 500;
+    text-decoration: none;
+    transition: color var(--transition-fast);
+    white-space: nowrap;
+}
+
+.tabs-nav-link:hover {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.tabs-nav-link.active {
+    color: var(--primary-color);
+}
+
+.tabs-nav-link.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background-color: var(--primary-color);
+}
+
+.tabs-nav-icon {
+    margin-right: var(--spacing-xs);
+    width: 16px;
+    height: 16px;
+}
+
+.tab-content-container {
+    background-color: var(--card-bg);
+    border-radius: 0 0 var(--border-radius) var(--border-radius);
+    box-shadow: var(--box-shadow);
+    min-height: 300px;
+}
+
+.tab-content {
+    display: none;
+    padding: var(--spacing-md);
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    min-height: 300px;
+}
+
+.tab-content.active {
+    display: block;
+    animation: fade-in var(--transition-normal);
+}
+
+@keyframes fade-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* Responsive tabs */
+@media (max-width: 768px) {
+    .tabs-nav {
+        flex-wrap: nowrap;
+        padding-bottom: var(--spacing-xs);
+    }
+    
+    .tabs-nav-link {
+        padding: var(--spacing-sm);
+    }
+}
+
+@media (max-width: 480px) {
+    .tabs-nav-link.active::after {
+        display: none;
+    }
+    
+    .tabs-nav-link.active {
+        background: var(--primary-color);
+        color: white;
+    }
+}

@@ -7,8 +7,10 @@ import cv2
 import time
 import threading
 import queue
+import uuid
 from collections import deque
 from config import DB_CONFIG
+from modules.database_module import save_posture_record, save_emotion_record, save_focus_record
 
 # 尝试导入posture_analysis模块
 try:
@@ -131,6 +133,14 @@ class WebPostureMonitor:
         self.is_running = False
         self.thread = None
         self.video_stream_handler = video_stream_handler
+        
+        # 会话和数据存储相关
+        self.session_id = str(uuid.uuid4())
+        self.last_save_time = time.time()
+        self.save_interval = 5.0  # 每5秒保存一次数据
+        self.last_posture_duration = 0
+        self.current_posture_start = None
+        self.emotion_confidence = 0.8  # 默认情绪置信度
         
         # 初始化处理分辨率
         self.process_width = DEFAULT_PROCESS_WIDTH
@@ -611,6 +621,7 @@ class WebPostureMonitor:
         consecutive_read_failures = 0
         last_frame_time = time.time()
         last_reconnect_time = time.time()
+        self.current_posture_start = time.time()  # 记录当前姿势开始时间
         
         while self.is_running and self.cap and self.cap.isOpened():
             try:
@@ -697,6 +708,42 @@ class WebPostureMonitor:
                 # 记录处理时间
                 process_time = time.time() - process_start_time
                 self.performance_stats['processing_times'].append(process_time)
+                
+                # 检查是否需要保存姿势记录
+                if pose_results['angle'] is not None:
+                    duration = int(current_time - self.current_posture_start)
+                    # 姿势状态发生改变时保存记录
+                    if (pose_results['is_bad_posture'] != self.pose_result.get('is_bad_posture') or
+                        duration >= 60):  # 每分钟至少保存一次
+                        posture_quality = 'bad' if pose_results['is_bad_posture'] else 'good'
+                        save_posture_record(
+                            pose_results['angle'],
+                            posture_quality,
+                            pose_results['is_occluded'],
+                            duration,
+                            self.session_id
+                        )
+                        self.current_posture_start = current_time
+                
+                # 每5秒保存一次情绪记录和专注度
+                if current_time - self.last_save_time >= self.save_interval:
+                    if emotion_results['emotion']:
+                        save_emotion_record(
+                            emotion_results['emotion'].name,
+                            self.emotion_confidence,
+                            self.session_id
+                        )
+                    
+                    # 计算并保存专注度
+                    focus_score = self._calculate_focus_score(pose_results, emotion_results)
+                    save_focus_record(
+                        focus_score,
+                        0.6,  # 姿势贡献度
+                        0.4,  # 情绪贡献度
+                        int(current_time - self.last_save_time),
+                        self.session_id
+                    )
+                    self.last_save_time = current_time
                 
                 # 添加处理时间和分辨率信息到显示帧
                 # 姿势帧显示处理信息
@@ -1055,3 +1102,51 @@ class WebPostureMonitor:
             print("未找到任何可用摄像头")
         
         return available_cameras
+
+    def _calculate_focus_score(self, pose_results, emotion_results):
+        """计算专注度分数"""
+        base_score = 70.0  # 基础分数
+        
+        # 姿势影响 (最大±20分)
+        if not pose_results['is_occluded']:
+            angle = pose_results.get('angle', 0)
+            if not pose_results['is_bad_posture']:
+                # 良好姿势奖励
+                base_score += 20.0 * (1 - min(abs(angle), 20) / 20)
+            else:
+                # 不良姿势惩罚
+                base_score -= min(20.0, abs(angle) / 2)
+        
+        # 情绪影响 (最大±10分)
+        if emotion_results['emotion']:
+            emotion_map = {
+                'NEUTRAL': 5.0,     # 中性情绪
+                'FOCUSED': 10.0,    # 专注状态
+                'HAPPY': 2.0,       # 适度愉悦
+                'TIRED': -8.0,      # 疲惫
+                'ANGRY': -5.0,      # 生气
+                'SAD': -3.0,        # 悲伤
+                'CONFUSED': -6.0    # 困惑
+            }
+            base_score += emotion_map.get(emotion_results['emotion'].name, 0.0)
+        
+        # 环境因素调整 (最大-10分)
+        if pose_results['is_occluded']:
+            base_score -= 10.0  # 遮挡严重影响专注度
+            
+        # 确保分数在0-100范围内
+        return max(0.0, min(100.0, base_score))
+        
+    def _update_posture_stats(self):
+        """更新姿势统计信息"""
+        current_time = time.time()
+        # 更新当前姿势持续时间
+        if self.current_posture_start:
+            self.last_posture_duration = int(current_time - self.current_posture_start)
+        
+        # 重置统计
+        if current_time - self.stats_reset_time >= 3600:  # 每小时重置一次
+            self.stats_reset_time = current_time
+            self.total_good_posture_time = 0
+            self.total_bad_posture_time = 0
+            self.posture_change_count = 0

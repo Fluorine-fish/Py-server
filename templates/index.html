@@ -91,6 +91,79 @@
                 </div>
             </div>
 
+            <!-- 统计数据区域 -->
+            <div class="statistics-container">
+                <!-- 时间范围选择器 -->
+                <div class="period-selector-container">
+                    <button class="period-selector active" data-period="day">今天</button>
+                    <button class="period-selector" data-period="week">本周</button>
+                    <button class="period-selector" data-period="month">本月</button>
+                </div>
+
+                <!-- 姿势统计 -->
+                <div class="stat-box">
+                    <h3>姿势分析统计</h3>
+                    <div class="chart-container">
+                        <canvas id="postureChart"></canvas>
+                    </div>
+                    <div class="stat-summary">
+                        <div class="stat-row">
+                            <span class="stat-label">平均头部角度:</span>
+                            <span id="avgAngle" class="stat-value">--°</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">良好姿势时长:</span>
+                            <span id="goodPostureTime" class="stat-value">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">不良姿势时长:</span>
+                            <span id="badPostureTime" class="stat-value">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">遮挡时长:</span>
+                            <span id="occludedTime" class="stat-value">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 情绪统计 -->
+                <div class="stat-box">
+                    <h3>情绪分析统计</h3>
+                    <div class="chart-container">
+                        <canvas id="emotionChart"></canvas>
+                    </div>
+                    <div id="emotionStats" class="stat-summary">
+                        <!-- 由JavaScript动态填充情绪统计数据 -->
+                    </div>
+                </div>
+
+                <!-- 专注度统计 -->
+                <div class="stat-box">
+                    <h3>专注度分析</h3>
+                    <div class="chart-container">
+                        <canvas id="focusChart"></canvas>
+                    </div>
+                    <div class="stat-summary">
+                        <div class="stat-row">
+                            <span class="stat-label">平均专注度:</span>
+                            <span id="avgFocus" class="stat-value">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">最高专注度:</span>
+                            <span id="maxFocus" class="stat-value">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">最低专注度:</span>
+                            <span id="minFocus" class="stat-value">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">专注时长:</span>
+                            <span id="focusDuration" class="stat-value">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- 帧率与分辨率控制 -->
             <div class="control-panel-fps">
                 <div class="control-panel-title">帧率与分辨率控制</div>
@@ -351,7 +424,9 @@
     <script src="/static/js/fps_control.js"></script>
     <script src="/static/js/serial.js"></script>
     <script src="/static/js/serial_enhanced.js"></script>
-    
+    <script src="/static/js/statistics.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <!-- 保留部分内联脚本以确保兼容性 -->
     <script>
         // 页面特定变量

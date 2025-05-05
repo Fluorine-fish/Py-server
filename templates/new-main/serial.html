@@ -1,0 +1,381 @@
+<div class="serial-container">
+    <div class="grid">
+        <!-- 串口连接控制 -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">串口连接</h3>
+            </div>
+            <div class="form-group">
+                <label class="form-label">串口设备</label>
+                <input type="text" id="portInput" class="form-input" placeholder="/dev/ttyUSB0" value="/dev/ttyUSB0">
+            </div>
+            <div class="form-group">
+                <label class="form-label">波特率</label>
+                <select id="baudrateSelect" class="form-input">
+                    <option value="9600">9600</option>
+                    <option value="19200">19200</option>
+                    <option value="38400">38400</option>
+                    <option value="57600">57600</option>
+                    <option value="115200" selected>115200</option>
+                </select>
+            </div>
+            <div class="button-group">
+                <button class="btn btn-primary" id="connectBtn">连接</button>
+                <button class="btn btn-danger" id="disconnectBtn" disabled>断开</button>
+            </div>
+            <div class="status-display">
+                状态: <span id="serialStatusText" class="status-disconnected">未连接</span>
+            </div>
+        </div>
+
+        <!-- 命令发送区域 -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">命令发送</h3>
+                <div class="card-actions">
+                    <button class="btn btn-secondary" id="toggleModeBtn">切换模式</button>
+                </div>
+            </div>
+            <!-- 文本模式 -->
+            <div id="textMode" class="command-mode active">
+                <div class="form-group">
+                    <label class="form-label">命令内容</label>
+                    <input type="text" id="commandInput" class="form-input" placeholder="输入要发送的命令">
+                </div>
+                <button class="btn btn-primary" id="sendCommandBtn">发送命令</button>
+            </div>
+            <!-- 帧模式 -->
+            <div id="frameMode" class="command-mode">
+                <div class="form-group">
+                    <label class="form-label">Yaw 角度</label>
+                    <div class="range-control">
+                        <input type="range" id="yawSlider" class="form-input" min="-180" max="180" value="0" step="0.1">
+                        <span id="yawValue">0°</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Pitch 角度</label>
+                    <div class="range-control">
+                        <input type="range" id="pitchSlider" class="form-input" min="-90" max="90" value="0" step="0.1">
+                        <span id="pitchValue">0°</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">
+                        <input type="checkbox" id="findBoolInput">
+                        启用追踪
+                    </label>
+                </div>
+                <button class="btn btn-primary" id="sendFrameBtn">发送帧数据</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 命令历史记录 -->
+    <div class="card mt-4">
+        <div class="card-header">
+            <h3 class="card-title">命令历史</h3>
+            <div class="card-actions">
+                <button class="btn btn-secondary" id="clearHistoryBtn">清空历史</button>
+            </div>
+        </div>
+        <div id="commandHistory" class="command-history">
+            <!-- 历史记录将通过JavaScript动态添加 -->
+        </div>
+        <div class="pagination" id="historyPagination">
+            <!-- 分页控件将通过JavaScript动态添加 -->
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    let currentPage = 1;
+    const perPage = 10;
+    
+    // 连接控制
+    const connectBtn = document.getElementById('connectBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const serialStatus = document.getElementById('serialStatusText');
+    
+    connectBtn.addEventListener('click', function() {
+        const port = document.getElementById('portInput').value;
+        const baudrate = parseInt(document.getElementById('baudrateSelect').value);
+        
+        fetch('/api/connect_serial', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ port, baudrate })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                updateConnectionStatus(true);
+                showNotification('串口连接成功', 'success');
+            } else {
+                showNotification(data.message || '连接失败', 'error');
+            }
+        });
+    });
+    
+    disconnectBtn.addEventListener('click', function() {
+        fetch('/api/disconnect_serial', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateConnectionStatus(false);
+                    showNotification('串口已断开', 'success');
+                }
+            });
+    });
+
+    // 模式切换
+    const toggleModeBtn = document.getElementById('toggleModeBtn');
+    const textMode = document.getElementById('textMode');
+    const frameMode = document.getElementById('frameMode');
+    
+    toggleModeBtn.addEventListener('click', function() {
+        textMode.classList.toggle('active');
+        frameMode.classList.toggle('active');
+        toggleModeBtn.textContent = textMode.classList.contains('active') ? '切换到帧模式' : '切换到文本模式';
+    });
+
+    // 文本命令发送
+    document.getElementById('sendCommandBtn').addEventListener('click', function() {
+        const command = document.getElementById('commandInput').value;
+        if (!command) return;
+        
+        fetch('/api/send_serial_command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification('命令已发送', 'success');
+                document.getElementById('commandInput').value = '';
+                loadHistory(currentPage);
+            } else {
+                showNotification(data.message || '发送失败', 'error');
+            }
+        });
+    });
+
+    // 帧数据发送
+    document.getElementById('sendFrameBtn').addEventListener('click', function() {
+        const frameData = {
+            yaw: parseFloat(document.getElementById('yawSlider').value),
+            pitch: parseFloat(document.getElementById('pitchSlider').value),
+            find_bool: document.getElementById('findBoolInput').checked
+        };
+        
+        fetch('/api/send_frame', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(frameData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification('帧数据已发送', 'success');
+                loadHistory(currentPage);
+            } else {
+                showNotification(data.message || '发送失败', 'error');
+            }
+        });
+    });
+
+    // 角度滑块更新
+    const yawSlider = document.getElementById('yawSlider');
+    const pitchSlider = document.getElementById('pitchSlider');
+    const yawValue = document.getElementById('yawValue');
+    const pitchValue = document.getElementById('pitchValue');
+    
+    yawSlider.addEventListener('input', function() {
+        yawValue.textContent = this.value + '°';
+    });
+    
+    pitchSlider.addEventListener('input', function() {
+        pitchValue.textContent = this.value + '°';
+    });
+
+    // 历史记录管理
+    function loadHistory(page) {
+        fetch(`/api/get_history?page=${page}&per_page=${perPage}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateHistoryDisplay(data.records);
+                    updatePagination(data.current_page, data.total_pages);
+                    currentPage = page;
+                }
+            });
+    }
+
+    function updateHistoryDisplay(records) {
+        const historyContainer = document.getElementById('commandHistory');
+        historyContainer.innerHTML = '';
+        
+        records.forEach(record => {
+            const item = document.createElement('div');
+            item.className = 'history-item';
+            item.innerHTML = `
+                <div class="history-time">${formatTime(record.timestamp)}</div>
+                <div class="history-content">
+                    <div class="sent-data">${record.sent_data}</div>
+                    ${record.received_data ? `<div class="received-data">${record.received_data}</div>` : ''}
+                </div>
+                <div class="history-status ${record.status}">${record.status}</div>
+            `;
+            historyContainer.appendChild(item);
+        });
+    }
+
+    function updatePagination(currentPage, totalPages) {
+        const pagination = document.getElementById('historyPagination');
+        pagination.innerHTML = '';
+        
+        if (totalPages <= 1) return;
+        
+        // 添加分页按钮
+        for (let i = 1; i <= totalPages; i++) {
+            const button = document.createElement('button');
+            button.className = `btn btn-secondary pagination-btn ${i === currentPage ? 'active' : ''}`;
+            button.textContent = i;
+            button.addEventListener('click', () => loadHistory(i));
+            pagination.appendChild(button);
+        }
+    }
+
+    // 清空历史记录
+    document.getElementById('clearHistoryBtn').addEventListener('click', function() {
+        if (!confirm('确定要清空所有历史记录吗？')) return;
+        
+        fetch('/api/clear_history', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('历史记录已清空', 'success');
+                    loadHistory(1);
+                }
+            });
+    });
+
+    // 辅助函数
+    function updateConnectionStatus(connected) {
+        connectBtn.disabled = connected;
+        disconnectBtn.disabled = !connected;
+        serialStatus.textContent = connected ? '已连接' : '未连接';
+        serialStatus.className = connected ? 'status-connected' : 'status-disconnected';
+    }
+
+    function formatTime(timestamp) {
+        return new Date(timestamp).toLocaleString();
+    }
+
+    function showNotification(message, type) {
+        const notification = document.createElement('div');
+        notification.className = `notification ${type}`;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.remove();
+        }, 3000);
+    }
+
+    // 初始化
+    loadHistory(1);
+});
+</script>
+
+<style>
+.command-mode {
+    display: none;
+}
+
+.command-mode.active {
+    display: block;
+}
+
+.button-group {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+}
+
+.status-display {
+    font-weight: 500;
+}
+
+.status-connected {
+    color: var(--secondary-color);
+}
+
+.status-disconnected {
+    color: var(--danger-color);
+}
+
+.command-history {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.history-item {
+    padding: var(--spacing-sm);
+    border-bottom: 1px solid var(--light-gray);
+}
+
+.history-time {
+    font-size: 0.9em;
+    color: var(--text-color);
+    margin-bottom: var(--spacing-xs);
+}
+
+.history-content {
+    margin: var(--spacing-xs) 0;
+}
+
+.sent-data {
+    color: var(--primary-color);
+}
+
+.received-data {
+    color: var(--secondary-color);
+    margin-top: var(--spacing-xs);
+}
+
+.history-status {
+    font-size: 0.9em;
+}
+
+.history-status.success {
+    color: var(--secondary-color);
+}
+
+.history-status.error {
+    color: var(--danger-color);
+}
+
+.pagination {
+    display: flex;
+    gap: var(--spacing-xs);
+    margin-top: var(--spacing-md);
+    justify-content: center;
+}
+
+.pagination-btn {
+    min-width: 32px;
+    height: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pagination-btn.active {
+    background-color: var(--primary-color);
+    color: white;
+}
+</style>

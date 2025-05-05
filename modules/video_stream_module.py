@@ -8,6 +8,10 @@ import threading
 from collections import deque
 import queue
 from config import DEBUG
+from datetime import datetime
+from threading import Thread, Lock
+from queue import Queue
+import os
 
 # 帧率和分辨率相关配置
 STREAM_FPS_TARGET = 25  # 目标流帧率
@@ -590,8 +594,164 @@ class VideoStreamHandler:
         
         # 如果跳采样后的尺寸与目标尺寸不完全匹配，进行最小程度的缩放调整
         actual_h, actual_w = subsampled.shape[:2]
-        if actual_w != target_width or actual_h != target_height:
+        if actual_w != target_width或actual_h != target_height:
             return cv2.resize(subsampled, (target_width, target_height), 
                              interpolation=cv2.INTER_NEAREST)
         
         return subsampled
+
+class VideoRecorder:
+    def __init__(self, output_dir='static/recordings'):
+        self.output_dir = output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        self.recording = False
+        self.writer = None
+        self.filename = None
+        self.frame_queue = Queue(maxsize=300)  # 10秒缓冲
+        self.record_thread = None
+        self.lock = Lock()
+        
+    def start_recording(self, frame_width, frame_height, fps=30):
+        """开始录制"""
+        if self.recording:
+            return False
+            
+        self.recording = True
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.filename = os.path.join(self.output_dir, f'recording_{timestamp}.mp4')
+        
+        # 使用 H.264 编码器
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        self.writer = cv2.VideoWriter(self.filename, fourcc, fps, (frame_width, frame_height))
+        
+        # 启动录制线程
+        self.record_thread = Thread(target=self._record_frames)
+        self.record_thread.daemon = True
+        self.record_thread.start()
+        
+        return True
+        
+    def stop_recording(self):
+        """停止录制"""
+        if not self.recording:
+            return False
+            
+        self.recording = False
+        # 等待录制线程结束
+        if self.record_thread:
+            self.record_thread.join()
+            
+        # 释放写入器
+        if self.writer:
+            self.writer.release()
+            self.writer = None
+            
+        return True
+        
+    def add_frame(self, frame):
+        """添加帧到录制队列"""
+        if self.recording and not self.frame_queue.full():
+            self.frame_queue.put(frame)
+            
+    def _record_frames(self):
+        """录制线程"""
+        while self.recording or not self.frame_queue.empty():
+            if not self.frame_queue.empty():
+                frame = self.frame_queue.get()
+                with self.lock:
+                    if self.writer:
+                        self.writer.write(frame)
+                        
+    def get_recording_status(self):
+        """获取录制状态"""
+        return {
+            'recording': self.recording,
+            'filename': self.filename if self.recording else None,
+            'queue_size': self.frame_queue.qsize()
+        }
+
+class VideoStream:
+    def __init__(self):
+        self.camera = None
+        self.processing = False
+        self.frame_queue = Queue(maxsize=10)
+        self.fps = 0
+        self.frame_times = []
+        self.last_frame_time = time.time()
+        self.fps_lock = Lock()
+        self.recorder = VideoRecorder()
+        
+    def start(self):
+        """启动视频流"""
+        if self.camera is None:
+            self.camera = cv2.VideoCapture(0)
+            
+        self.processing = True
+        Thread(target=self._update_frame, daemon=True).start()
+        
+    def stop(self):
+        """停止视频流"""
+        self.processing = False
+        if self.recorder.recording:
+            self.recorder.stop_recording()
+        if self.camera:
+            self.camera.release()
+            self.camera = None
+            
+    def read(self):
+        """读取当前帧"""
+        if not self.frame_queue.empty():
+            return self.frame_queue.get()
+        return None
+        
+    def _update_frame(self):
+        """更新帧和FPS"""
+        while self.processing:
+            if self.camera is None or not self.camera.isOpened():
+                time.sleep(0.1)
+                continue
+                
+            ret, frame = self.camera.read()
+            if not ret:
+                continue
+                
+            # 计算FPS
+            current_time = time.time()
+            self.frame_times.append(current_time)
+            
+            # 只保留最近1秒的帧时间
+            while self.frame_times and self.frame_times[0] < current_time - 1:
+                self.frame_times.pop(0)
+                
+            with self.fps_lock:
+                self.fps = len(self.frame_times)
+                
+            # 将帧添加到队列
+            if not self.frame_queue.full():
+                self.frame_queue.put(frame)
+                
+            # 添加到录制队列
+            if self.recorder.recording:
+                self.recorder.add_frame(frame)
+                
+    def get_fps(self):
+        """获取当前FPS"""
+        with self.fps_lock:
+            return self.fps
+            
+    def start_recording(self):
+        """开始录制"""
+        if self.camera is None:
+            return False
+            
+        width = int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        return self.recorder.start_recording(width, height)
+        
+    def stop_recording(self):
+        """停止录制"""
+        return self.recorder.stop_recording()
+        
+    def get_recording_status(self):
+        """获取录制状态"""
+        return self.recorder.get_recording_status()

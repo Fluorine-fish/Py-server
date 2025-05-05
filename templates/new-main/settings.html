@@ -1,0 +1,262 @@
+<div class="settings-container">
+    <div class="grid">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">视频流设置</h3>
+            </div>
+            <div class="form-group">
+                <label class="form-label">
+                    <input type="checkbox" id="adaptiveResolution" checked>
+                    自适应分辨率
+                </label>
+                <select id="resolutionSelector" class="form-input" disabled>
+                    <option value="0">高分辨率 (640x480)</option>
+                    <option value="1" selected>中分辨率 (480x360)</option>
+                    <option value="2">低分辨率 (320x240)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">JPEG质量</label>
+                <div class="range-control">
+                    <input type="range" id="qualitySlider" class="form-input" min="50" max="100" value="90">
+                    <span id="qualityValue">90%</span>
+                </div>
+            </div>
+            <button class="btn btn-primary" id="applyVideoSettings">应用设置</button>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">性能优化</h3>
+            </div>
+            <div class="form-group">
+                <label class="form-label">跳帧设置</label>
+                <select id="skipFrames" class="form-input">
+                    <option value="0">不跳帧</option>
+                    <option value="1">跳过1帧</option>
+                    <option value="2" selected>跳过2帧</option>
+                    <option value="3">跳过3帧</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">
+                    <input type="checkbox" id="useSeparateGrab" checked>
+                    使用独立抓取线程
+                </label>
+            </div>
+            <button class="btn btn-primary" id="applyPerformanceSettings">应用设置</button>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">数据管理</h3>
+            </div>
+            <div class="form-group">
+                <label class="form-label">数据保留时间</label>
+                <select id="dataRetention" class="form-input">
+                    <option value="7">保留7天</option>
+                    <option value="30" selected>保留30天</option>
+                    <option value="90">保留90天</option>
+                    <option value="180">保留180天</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">
+                    <input type="checkbox" id="autoBackup" checked>
+                    启用自动备份
+                </label>
+            </div>
+            <button class="btn btn-primary" id="applyDataSettings">应用设置</button>
+        </div>
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-header">
+            <h3 class="card-title">系统信息</h3>
+        </div>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">系统版本</span>
+                <span class="info-value" id="systemVersion">1.0.0</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">运行时间</span>
+                <span class="info-value" id="uptime">-</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">CPU使用率</span>
+                <span class="info-value" id="cpuUsage">-</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">内存使用</span>
+                <span class="info-value" id="memoryUsage">-</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // 分辨率自适应切换
+    const adaptiveResolution = document.getElementById('adaptiveResolution');
+    const resolutionSelector = document.getElementById('resolutionSelector');
+    
+    adaptiveResolution.addEventListener('change', function() {
+        resolutionSelector.disabled = this.checked;
+    });
+
+    // 更新质量滑块值显示
+    const qualitySlider = document.getElementById('qualitySlider');
+    const qualityValue = document.getElementById('qualityValue');
+    
+    qualitySlider.addEventListener('input', function() {
+        qualityValue.textContent = this.value + '%';
+    });
+
+    // 应用视频设置
+    document.getElementById('applyVideoSettings').addEventListener('click', function() {
+        const settings = {
+            adaptive: adaptiveResolution.checked,
+            resolution_index: adaptiveResolution.checked ? null : parseInt(resolutionSelector.value),
+            quality: parseInt(qualitySlider.value)
+        };
+
+        fetch('/api/set_resolution_mode', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(settings)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification('设置已更新', 'success');
+            } else {
+                showNotification('更新设置失败', 'error');
+            }
+        });
+    });
+
+    // 应用性能设置
+    document.getElementById('applyPerformanceSettings').addEventListener('click', function() {
+        const settings = {
+            skip_frames: parseInt(document.getElementById('skipFrames').value),
+            use_separate_grab: document.getElementById('useSeparateGrab').checked
+        };
+
+        fetch('/api/set_performance_mode', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(settings)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification('性能设置已更新', 'success');
+            } else {
+                showNotification('更新性能设置失败', 'error');
+            }
+        });
+    });
+
+    // 定期更新系统信息
+    function updateSystemInfo() {
+        fetch('/api/get_performance_stats')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const stats = data.performance_stats;
+                    document.getElementById('cpuUsage').textContent = stats.cpu_usage + '%';
+                    document.getElementById('memoryUsage').textContent = formatBytes(stats.memory_usage);
+                    document.getElementById('uptime').textContent = formatUptime(stats.uptime);
+                }
+            });
+    }
+
+    // 格式化字节数
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // 格式化运行时间
+    function formatUptime(seconds) {
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        
+        let uptime = '';
+        if (days > 0) uptime += days + '天 ';
+        if (hours > 0) uptime += hours + '小时 ';
+        if (minutes > 0) uptime += minutes + '分钟';
+        
+        return uptime || '不到1分钟';
+    }
+
+    // 显示通知
+    function showNotification(message, type) {
+        const notification = document.createElement('div');
+        notification.className = `notification ${type}`;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.remove();
+        }, 3000);
+    }
+
+    // 初始化
+    updateSystemInfo();
+    setInterval(updateSystemInfo, 5000);
+});
+</script>
+
+<style>
+.mt-4 {
+    margin-top: var(--spacing-lg);
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--spacing-md);
+    margin-top: var(--spacing-md);
+}
+
+.info-item {
+    display: flex;
+    flex-direction: column;
+    padding: var(--spacing-sm);
+    background: var(--light-gray);
+    border-radius: var(--border-radius);
+}
+
+.info-label {
+    font-size: 0.9em;
+    color: var(--text-color);
+    margin-bottom: var(--spacing-xs);
+}
+
+.info-value {
+    font-size: 1.1em;
+    font-weight: 500;
+    color: var(--primary-color);
+}
+
+.range-control {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+#qualityValue {
+    min-width: 48px;
+    text-align: right;
+}
+</style>

@@ -1,0 +1,379 @@
+<div class="emotion-container">
+    <div class="grid">
+        <!-- 视频和情绪状态区域 -->
+        <div class="card video-card">
+            <div class="card-header">
+                <h3 class="card-title">情绪监测</h3>
+            </div>
+            <div class="video-feed">
+                <img id="emotionVideo" src="/emotion_video_feed" alt="情绪分析视频流">
+            </div>
+            <div class="status-overlay">
+                <div id="currentEmotion" class="emotion-status">分析中...</div>
+            </div>
+        </div>
+
+        <!-- 实时情绪指标 -->
+        <div class="card metrics-card">
+            <div class="card-header">
+                <h3 class="card-title">情绪指标</h3>
+            </div>
+            <div class="metrics-grid">
+                <div class="metric-item">
+                    <div class="metric-label">专注度</div>
+                    <div id="focusLevel" class="metric-value">-%</div>
+                    <div class="metric-progress">
+                        <div class="progress-bar" id="focusProgress"></div>
+                    </div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">压力水平</div>
+                    <div id="stressLevel" class="metric-value">-%</div>
+                    <div class="metric-progress">
+                        <div class="progress-bar" id="stressProgress"></div>
+                    </div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">疲劳度</div>
+                    <div id="fatigueLevel" class="metric-value">-%</div>
+                    <div class="metric-progress">
+                        <div class="progress-bar" id="fatigueProgress"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 情绪趋势和分析 -->
+    <div class="grid mt-4">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">情绪分布</h3>
+            </div>
+            <div class="chart-container">
+                <canvas id="emotionPieChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">专注度趋势</h3>
+            </div>
+            <div class="chart-container">
+                <canvas id="focusLineChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- 情绪分析报告 -->
+    <div class="card mt-4">
+        <div class="card-header">
+            <h3 class="card-title">情绪分析报告</h3>
+        </div>
+        <div class="report-content" id="emotionReport">
+            <!-- 报告内容将通过JavaScript动态生成 -->
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    let emotionPieChart, focusLineChart;
+    let updateInterval;
+
+    // 初始化图表
+    function initializeCharts() {
+        // 情绪分布饼图
+        const pieCtx = document.getElementById('emotionPieChart').getContext('2d');
+        emotionPieChart = new Chart(pieCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['专注', '放松', '困倦', '压力'],
+                datasets: [{
+                    data: [0, 0, 0, 0],
+                    backgroundColor: [
+                        'var(--secondary-color)',
+                        'var(--primary-color)',
+                        'var(--warning-color)',
+                        'var(--danger-color)'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+
+        // 专注度趋势线图
+        const lineCtx = document.getElementById('focusLineChart').getContext('2d');
+        focusLineChart = new Chart(lineCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: '专注度',
+                    data: [],
+                    borderColor: 'var(--primary-color)',
+                    tension: 0.4,
+                    fill: false
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        ticks: {
+                            callback: value => value + '%'
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+    }
+
+    // 更新情绪状态
+    function updateEmotionStatus() {
+        fetch('/api/get_emotion_result')
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    updateMetrics(data.emotion_result);
+                    updateCharts(data.emotion_result);
+                    updateReport(data.emotion_result);
+                }
+            });
+    }
+
+    // 更新指标显示
+    function updateMetrics(result) {
+        // 更新专注度
+        const focus = result.focus_level || 0;
+        document.getElementById('focusLevel').textContent = focus.toFixed(0) + '%';
+        document.getElementById('focusProgress').style.width = focus + '%';
+        
+        // 更新压力水平
+        const stress = result.stress_level || 0;
+        document.getElementById('stressLevel').textContent = stress.toFixed(0) + '%';
+        document.getElementById('stressProgress').style.width = stress + '%';
+        
+        // 更新疲劳度
+        const fatigue = result.fatigue_level || 0;
+        document.getElementById('fatigueLevel').textContent = fatigue.toFixed(0) + '%';
+        document.getElementById('fatigueProgress').style.width = fatigue + '%';
+
+        // 更新当前情绪状态
+        const emotionStatus = document.getElementById('currentEmotion');
+        emotionStatus.textContent = result.current_emotion || '未检测';
+        emotionStatus.className = 'emotion-status ' + (result.current_emotion || '').toLowerCase();
+    }
+
+    // 更新图表数据
+    function updateCharts(result) {
+        // 更新情绪分布饼图
+        if (result.emotion_distribution) {
+            emotionPieChart.data.datasets[0].data = [
+                result.emotion_distribution.focused || 0,
+                result.emotion_distribution.relaxed || 0,
+                result.emotion_distribution.tired || 0,
+                result.emotion_distribution.stressed || 0
+            ];
+            emotionPieChart.update();
+        }
+
+        // 更新专注度趋势图
+        if (result.focus_trend) {
+            const trend = result.focus_trend;
+            focusLineChart.data.labels = trend.map(point => formatTime(point.time));
+            focusLineChart.data.datasets[0].data = trend.map(point => point.value);
+            focusLineChart.update();
+        }
+    }
+
+    // 更新分析报告
+    function updateReport(result) {
+        const reportContainer = document.getElementById('emotionReport');
+        if (!result.analysis) {
+            reportContainer.innerHTML = '<div class="no-data">暂无分析数据</div>';
+            return;
+        }
+
+        let reportHtml = '';
+        
+        // 添加总结
+        if (result.analysis.summary) {
+            reportHtml += `
+                <div class="report-section">
+                    <h4>总体状态</h4>
+                    <p>${result.analysis.summary}</p>
+                </div>
+            `;
+        }
+
+        // 添加详细分析
+        if (result.analysis.details && result.analysis.details.length > 0) {
+            reportHtml += '<div class="report-section"><h4>详细分析</h4><ul>';
+            result.analysis.details.forEach(detail => {
+                reportHtml += `<li class="analysis-item ${detail.type}">${detail.content}</li>`;
+            });
+            reportHtml += '</ul></div>';
+        }
+
+        // 添加建议
+        if (result.analysis.suggestions && result.analysis.suggestions.length > 0) {
+            reportHtml += '<div class="report-section"><h4>改善建议</h4><ul>';
+            result.analysis.suggestions.forEach(suggestion => {
+                reportHtml += `<li class="suggestion-item">${suggestion}</li>`;
+            });
+            reportHtml += '</ul></div>';
+        }
+
+        reportContainer.innerHTML = reportHtml;
+    }
+
+    // 格式化时间
+    function formatTime(timestamp) {
+        return new Date(timestamp).toLocaleTimeString('zh-CN', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    }
+
+    // 初始化
+    initializeCharts();
+    updateEmotionStatus();
+    updateInterval = setInterval(updateEmotionStatus, 1000);
+});
+</script>
+
+<style>
+.video-feed {
+    position: relative;
+    width: 100%;
+    max-width: 640px;
+    margin: 0 auto;
+}
+
+.status-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: var(--spacing-sm);
+    background: rgba(0, 0, 0, 0.5);
+    color: white;
+}
+
+.emotion-status {
+    font-size: 1.2em;
+    font-weight: 500;
+    text-align: center;
+}
+
+.emotion-status.focused {
+    color: var(--secondary-color);
+}
+
+.emotion-status.stressed {
+    color: var(--danger-color);
+}
+
+.emotion-status.tired {
+    color: var(--warning-color);
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--spacing-md);
+}
+
+.metric-item {
+    padding: var(--spacing-md);
+    background: var(--light-gray);
+    border-radius: var(--border-radius);
+}
+
+.metric-progress {
+    height: 6px;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 3px;
+    margin-top: var(--spacing-xs);
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background: var(--primary-color);
+    transition: width 0.3s ease;
+}
+
+.chart-container {
+    height: 300px;
+    padding: var(--spacing-md);
+}
+
+.report-content {
+    padding: var(--spacing-md);
+}
+
+.report-section {
+    margin-bottom: var(--spacing-md);
+}
+
+.report-section h4 {
+    margin-bottom: var(--spacing-sm);
+    color: var(--dark-gray);
+}
+
+.analysis-item {
+    margin-bottom: var(--spacing-sm);
+    padding-left: var(--spacing-md);
+    position: relative;
+}
+
+.analysis-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 8px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--primary-color);
+}
+
+.suggestion-item {
+    margin-bottom: var(--spacing-sm);
+    padding-left: var(--spacing-md);
+    position: relative;
+}
+
+.suggestion-item::before {
+    content: '•';
+    position: absolute;
+    left: 0;
+    color: var(--secondary-color);
+}
+
+.no-data {
+    text-align: center;
+    color: var(--text-color);
+    padding: var(--spacing-lg);
+    font-style: italic;
+}
+</style>
