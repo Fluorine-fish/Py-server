@@ -136,3 +136,58 @@ def clear_history():
     except Exception as e:
         print(f"清空历史记录失败: {str(e)}")
         return False
+
+# 添加 DatabaseModule 类作为现有函数的包装器
+class DatabaseModule:
+    """数据库操作模块类 - 包装现有函数"""
+    
+    def __init__(self):
+        """初始化数据库模块"""
+        self.initialized = init_database()
+    
+    def save_record(self, sent_data, received_data, status="success", message=""):
+        """保存通信记录"""
+        return save_record_to_db(sent_data, received_data, status, message)
+    
+    def save_frame(self, frame_data):
+        """保存帧数据"""
+        return save_frame_to_db(frame_data)
+    
+    def get_history(self, page=1, per_page=10):
+        """获取历史记录"""
+        return get_history_records(page, per_page)
+    
+    def clear_all_history(self):
+        """清空所有历史记录"""
+        return clear_history()
+        
+    def get_dashboard_stats(self, days=7):
+        """获取仪表板统计数据"""
+        # 占位实现，根据实际需求补充
+        return {
+            "posture_count": 0,
+            "bad_posture_percentage": 0,
+            "time_series_data": []
+        }
+        
+    def get_daily_summary(self, date=None):
+        """获取每日摘要数据"""
+        # 占位实现，根据实际需求补充
+        return {
+            "total_sessions": 0,
+            "average_posture_score": 0,
+            "bad_posture_incidents": 0
+        }
+        
+    def get_recent_posture_events(self, limit=10):
+        """获取最近姿势事件"""
+        # 占位实现，根据实际需求补充
+        return []
+        
+    def get_usage_time_stats(self, period="week"):
+        """获取系统使用时间统计"""
+        # 占位实现，根据实际需求补充
+        return {
+            "labels": [],
+            "data": []
+        }

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>桌面智能体家长端</title>
+    <style>
+        body {
+            font-family: "Helvetica Neue", sans-serif;
+            background-color: #f5f7fa;
+            margin: 0;
+            padding: 0;
+        }
+
+        header {
+            background-color: #4a90e2;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        main {
+            padding: 20px;
+        }
+
+        .section {
+            background-color: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        h2 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        canvas {
+            width: 100% !important;
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        video {
+            width: 100%;
+            border-radius: 10px;
+        }
+
+        img.video-feed {
+            width: 100%;
+            border-radius: 10px;
+            max-height: 400px;
+            object-fit: cover;
+        }
+
+        button {
+            background-color: #4a90e2;
+            color: white;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background-color: #357abd;
+        }
+
+        button.red {
+            background-color: #e74c3c;
+        }
+
+        button.red:hover {
+            background-color: #c0392b;
+        }
+
+        #reportOutput {
+            margin-top: 20px;
+        }
+
+        .status-container {
+            display: flex;
+            flex-wrap: wrap;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+
+        .status-item {
+            flex: 1;
+            min-width: 150px;
+            margin: 5px;
+        }
+
+        .status-label {
+            font-weight: bold;
+            color: #555;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: white;
+            font-size: 0.85em;
+            margin-left: 5px;
+        }
+
+        .badge-good {
+            background-color: #2ecc71;
+        }
+
+        .badge-warning {
+            background-color: #f39c12;
+        }
+
+        .badge-bad {
+            background-color: #e74c3c;
+        }
+
+        /* 控制面板 */
+        .control-panel {
+            background-color: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 20px;
+            }
+
+            h2 {
+                font-size: 18px;
+            }
+
+            .section {
+                padding: 15px;
+                margin-bottom: 15px;
+            }
+
+            button {
+                width: 48%;
+                margin: 5px 1%;
+            }
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <header>
+        <h1>桌面智能体 - 家长端监控面板</h1>
+    </header>
+    <main>
+        <!-- 控制面板 -->
+        <div class="control-panel">
+            <div id="analysisControls">
+                <button id="startAnalysisBtn">启动分析系统</button>
+                <button id="stopAnalysisBtn" class="red">停止分析系统</button>
+                <button id="returnToMainBtn">返回主界面</button>
+            </div>
+            <div id="analysisStatus">
+                系统状态: <span id="systemStatusText">未初始化</span>
+            </div>
+        </div>
+
+        <!-- 实时视频监控 -->
+        <div class="section">
+            <h2>实时监控</h2>
+            <div style="display: flex; flex-wrap: wrap; gap: 20px;">
+                <div style="flex: 1; min-width: 300px;">
+                    <h3>姿势分析</h3>
+                    <img id="poseVideo" class="video-feed" src="/pose_video_feed" alt="姿势分析视频" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='">
+                </div>
+                <div style="flex: 1; min-width: 300px;">
+                    <h3>情绪分析</h3>
+                    <img id="emotionVideo" class="video-feed" src="/emotion_video_feed" alt="情绪分析视频" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='">
+                </div>
+            </div>
+            <div class="status-container">
+                <div class="status-item">
+                    <span class="status-label">头部角度:</span>
+                    <span id="headAngle" class="status-value">-- °</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">姿势状态:</span>
+                    <span id="postureStatus" class="status-value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">当前情绪:</span>
+                    <span id="emotionStatus" class="status-value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">检测状态:</span>
+                    <span id="detectionStatus" class="status-value">--</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 坐姿监测 -->
+        <div class="section">
+            <h2>坐姿监测</h2>
+            <p>记录一天内坐姿不良次数：</p>
+            <canvas id="postureChart"></canvas>
+        </div>
+
+        <!-- 情绪监测 -->
+        <div class="section">
+            <h2>情绪波动</h2>
+            <p>情绪分布（快乐、生气、悲伤、困惑等）：</p>
+            <canvas id="emotionChart"></canvas>
+        </div>
+
+        <!-- 专注度 -->
+        <div class="section">
+            <h2>学习专注度</h2>
+            <p>记录每小时专注时间百分比：</p>
+            <canvas id="focusChart"></canvas>
+        </div>
+
+        <!-- 报告生成 -->
+        <div class="section">
+            <h2>日报 / 周报生成</h2>
+            <button onclick="generateReport('daily')">生成日报</button>
+            <button onclick="generateReport('weekly')">生成周报</button>
+            <div id="reportOutput"></div>
+        </div>
+    </main>
+
+    <!-- 添加前端JavaScript -->
+    <script src="/static/js/parent_dashboard.js"></script>
+    <script>
+        // 导航到主界面
+        document.getElementById('returnToMainBtn').addEventListener('click', function() {
+            window.location.href = '/';
+        });
+    </script>
+</body>
+</html>

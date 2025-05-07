@@ -7,6 +7,7 @@ import queue
 import time
 from modules.database_module import save_record_to_db, get_history_records, clear_history
 from modules.posture_module import WebPostureMonitor, posture_params
+from modules.analytics_module import analytics_instance
 
 # 创建蓝图
 routes_bp = Blueprint('routes', __name__)
@@ -644,3 +645,245 @@ def set_resolution_mode():
 def get_pose_status_compat():
     """获取姿势状态的兼容路由（无API前缀）"""
     return get_pose_status()
+
+# 路由：新的仪表板页面
+@routes_bp.route('/dashboard')
+def dashboard():
+    """渲染新的家长监控仪表板页面"""
+    return render_template('new_dashboard.html')
+
+# 路由：获取系统状态
+@routes_bp.route('/api/status')
+def get_system_status():
+    """获取系统状态信息"""
+    global posture_monitor, video_stream_handler
+    
+    try:
+        # 初始化状态信息
+        app_status = {
+            'emotion_analysis_running': False,
+            'last_error': '',
+            'api_version': "1.2.0"
+        }
+        
+        # 更新状态信息
+        if posture_monitor:
+            app_status['emotion_analysis_running'] = posture_monitor.is_running
+        
+        # 获取处理器状态
+        is_posture_module_available = True if posture_monitor else False
+        
+        # 获取摄像头状态
+        camera_status = {
+            'initialized': False
+        }
+        
+        if posture_monitor and hasattr(posture_monitor, 'cap'):
+            camera_status['initialized'] = posture_monitor.cap is not None and posture_monitor.cap.isOpened()
+        
+        return jsonify({
+            'status': 'success',
+            'app_status': app_status,
+            'posture_module_available': is_posture_module_available,
+            'camera_status': camera_status
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'获取系统状态失败: {str(e)}'
+        })
+
+# 路由：获取姿势结果
+@routes_bp.route('/api/get_pose_result')
+def get_pose_result():
+    """获取最新的姿势分析结果"""
+    global posture_monitor
+    
+    try:
+        if not posture_monitor:
+            return jsonify({
+                'status': 'error',
+                'message': '姿势分析系统未初始化',
+                'pose_result': None
+            })
+        
+        # 获取姿势分析结果
+        pose_result = posture_monitor.pose_result
+        
+        return jsonify({
+            'status': 'success',
+            'pose_result': pose_result
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'获取姿势分析结果失败: {str(e)}',
+            'pose_result': None
+        })
+
+# 路由：家长端监控面板(新UI)
+@routes_bp.route('/parent_dashboard')
+def parent_dashboard():
+    """渲染新的家长端监控面板页面"""
+    return render_template('parent_dashboard.html')
+
+# ===== 家长端监控面板API =====
+
+# 路由：记录姿势和情绪数据
+@routes_bp.route('/api/record_analysis_data', methods=['POST'])
+def record_analysis_data():
+    """记录姿势和情绪分析数据到数据库"""
+    global posture_monitor, analytics_instance
+    
+    try:
+        # 获取当前的姿势和情绪数据
+        pose_data = None
+        emotion_data = None
+        
+        if posture_monitor:
+            pose_data = posture_monitor.pose_result
+            emotion_data = posture_monitor.emotion_result
+        
+        if not pose_data and not emotion_data:
+            return jsonify({
+                'status': 'error',
+                'message': '没有可用的分析数据'
+            })
+        
+        # 记录数据
+        if pose_data:
+            analytics_instance.record_posture_data(pose_data)
+        
+        if emotion_data:
+            analytics_instance.record_emotion_data(emotion_data)
+        
+        # 更新专注度数据
+        analytics_instance.update_focus_data()
+        
+        return jsonify({
+            'status': 'success',
+            'message': '分析数据记录成功'
+        })
+    except Exception as e:
+        print(f"记录分析数据失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'记录分析数据失败: {str(e)}'
+        })
+
+# 路由：获取坐姿数据
+@routes_bp.route('/api/get_posture_data')
+def get_posture_data():
+    """获取坐姿数据用于图表显示"""
+    try:
+        days = request.args.get('days', 7, type=int)
+        
+        # 获取坐姿数据
+        posture_data = analytics_instance.get_posture_data_by_day(days)
+        
+        return jsonify({
+            'status': 'success',
+            'data': posture_data
+        })
+    except Exception as e:
+        print(f"获取坐姿数据失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取坐姿数据失败: {str(e)}'
+        })
+
+# 路由：获取情绪分布数据
+@routes_bp.route('/api/get_emotion_distribution')
+def get_emotion_distribution():
+    """获取情绪分布数据用于图表显示"""
+    try:
+        hours = request.args.get('hours', 24, type=int)
+        
+        # 获取情绪分布数据
+        emotion_data = analytics_instance.get_emotion_distribution(hours)
+        
+        return jsonify({
+            'status': 'success',
+            'data': emotion_data
+        })
+    except Exception as e:
+        print(f"获取情绪分布数据失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取情绪分布数据失败: {str(e)}'
+        })
+
+# 路由：获取专注度数据
+@routes_bp.route('/api/get_focus_data')
+def get_focus_data():
+    """获取专注度数据用于图表显示"""
+    try:
+        hours = request.args.get('hours', 7, type=int)
+        
+        # 获取专注度数据
+        focus_data = analytics_instance.get_focus_data_by_hour(hours)
+        
+        return jsonify({
+            'status': 'success',
+            'data': focus_data
+        })
+    except Exception as e:
+        print(f"获取专注度数据失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取专注度数据失败: {str(e)}'
+        })
+
+# 路由：生成报告
+@routes_bp.route('/api/generate_report')
+def generate_report():
+    """生成日报或周报"""
+    try:
+        report_type = request.args.get('type', 'daily')
+        
+        if report_type not in ['daily', 'weekly']:
+            return jsonify({
+                'status': 'error',
+                'message': '无效的报告类型，只支持daily或weekly'
+            })
+        
+        # 生成报告
+        report_data = analytics_instance.generate_report(report_type)
+        
+        return jsonify({
+            'status': 'success',
+            'report': report_data
+        })
+    except Exception as e:
+        print(f"生成报告失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'生成报告失败: {str(e)}'
+        })
+
+# 路由：获取最新报告
+@routes_bp.route('/api/get_latest_report')
+def get_latest_report():
+    """获取最新的报告"""
+    try:
+        report_type = request.args.get('type', 'daily')
+        
+        if report_type not in ['daily', 'weekly']:
+            return jsonify({
+                'status': 'error',
+                'message': '无效的报告类型，只支持daily或weekly'
+            })
+        
+        # 获取最新报告
+        report_data = analytics_instance.get_latest_report(report_type)
+        
+        return jsonify({
+            'status': 'success',
+            'report': report_data
+        })
+    except Exception as e:
+        print(f"获取最新报告失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取最新报告失败: {str(e)}'
+        })
