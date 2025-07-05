@@ -23,7 +23,9 @@ from serial_handler import SerialHandler
 from config import (SERIAL_BAUDRATE, 
                     CHATBOT_MODULE,
                     TIME_OUT,
-                    AUTO_RETURN)
+                    AUTO_RETURN,
+                    MODULE_SENSITY,
+                    ENABLE_WELCOME_MESSAGE)
 
 
 # 修改后的Agent类定义 (直接将声明代码复制过来)
@@ -253,6 +255,8 @@ class ChatbotService:
         # 构建绝对路径
         base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         tools_path = os.path.join(base_path, "Audio/tools.json")
+
+        self.loop_cnt = 0  # 用于计数对话次数
         
         # 初始化串口处理器
         try:
@@ -304,36 +308,49 @@ class ChatbotService:
 
         kws_models = ["Audio/Snowboy/resources/models/lampbot.pmdl"]
 
-        detector = snowboydecoder.HotwordDetector(kws_models, sensitivity=0.9)
-        print("正在监听唤醒词... 按 Ctrl+C 退出")
-        detector.start(sleep_time=0.03, stop_on_detect=True)
-        detector.terminate()
-        print("唤醒词被检测到，开始语音识别...")
-        msg = "你好，小灵"
-        self.send_message(msg) # 语音识别成功的交互
+        detector = snowboydecoder.HotwordDetector(kws_models, sensitivity=MODULE_SENSITY)
 
-        start_time = datetime.now()
-        timeout_seconds = TIME_OUT
+        key = input() #等待输入s
+        if key == 's':
+            # 发送欢迎消息，获取自我介绍
+            if ENABLE_WELCOME_MESSAGE and self.loop_cnt == 0:
+                try:
+                    print("正在请求语音助手自我介绍...")
+                    # msg = "你好，请简要介绍一下自己的功能，不要举例,不要使用\"嗨\",不要提到自己机械臂的功能。并且告诉用户，用“你好小灵”来唤醒你"
+                    # response = chatbot_service.send_message(msg)
+                    self.speak_text("你好！我是瞳灵智能台灯，我能开关灯光、调节亮度，让房间变亮或者变暗哦！还能控制机械臂把光照到你需要的地方呢！如果有任何需要，请用“你好小灵”来唤醒我!")
+                except Exception as e:
+                    print(f"语音助手自我介绍时出错: {str(e)}")
+            print("正在监听唤醒词... 按 Ctrl+C 退出")
+            detector.start(sleep_time=0.03, stop_on_detect=True)
+            detector.terminate()
+            print("唤醒词被检测到，开始语音识别...")
+            msg = "你好，小灵"
+            self.send_message(msg) # 语音识别成功的交互
 
-        for i in range(30): #允许最多30次对话，对话之后进入休眠
-            current_time = datetime.now()
-            elapsed_time = (current_time - start_time).total_seconds()
-            
-            if elapsed_time >= timeout_seconds:
-                print(f"==>对话超时({timeout_seconds}秒)，助手将进入休眠状态<==")
-                break
+            start_time = datetime.now()
+            timeout_seconds = TIME_OUT
 
-            sentence = self.my_agent.get_message()
+            for i in range(30): #允许最多30次对话，对话之后进入休眠
+                current_time = datetime.now()
+                elapsed_time = (current_time - start_time).total_seconds()
+                
+                if elapsed_time >= timeout_seconds:
+                    print(f"==>对话超时({timeout_seconds}秒)，助手将进入休眠状态<==")
+                    break
 
-            if ("休息" in sentence or "结束" in sentence or "退出" in sentence) and AUTO_RETURN:
-                print("==>检测到结束语，助手将进入休眠状态<==")
-                break
-            print(f"==>识别结果：{sentence}<==")
-            self.my_agent.send_message(sentence)
+                sentence = self.my_agent.get_message()
 
-        msg = "小灵先休息啦，有事情可以随时叫我哦！"
-        self.my_agent.speak_text(msg)
-        print("==>对话结束，助手进入休眠状态<==")
+                if ("休息" in sentence or "结束" in sentence or "退出" in sentence) and AUTO_RETURN:
+                    print("==>检测到结束语，助手将进入休眠状态<==")
+                    break
+                print(f"==>识别结果：{sentence}<==")
+                self.my_agent.send_message(sentence)
+
+            msg = "小灵先休息啦，有事情可以随时叫我哦！"
+            self.my_agent.speak_text(msg)
+            print("==>对话结束，助手进入休眠状态<==")
+            self.loop_cnt += 1
 
     def reset(self):
         """重置对话上下文"""
