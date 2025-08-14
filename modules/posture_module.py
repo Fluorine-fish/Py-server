@@ -50,8 +50,8 @@ except ImportError as e:
     BROW_DOWN_THRESHOLD = 0.04
     CAMERA_WIDTH = 640
     CAMERA_HEIGHT = 480
-    PROCESS_WIDTH = 320
-    PROCESS_HEIGHT = 240
+    PROCESS_WIDTH = 640  # 提高默认处理分辨率以保证识别效果
+    PROCESS_HEIGHT = 480  # 提高默认处理分辨率以保证识别效果
     OCCLUSION_FRAMES_THRESHOLD = 10
     CLEAR_FRAMES_THRESHOLD = 5
     HEAD_ANGLE_THRESHOLD = 45
@@ -82,7 +82,7 @@ RESOLUTION_ADJUST_INTERVAL = 5.0  # 分辨率调整间隔（秒）
 # 摄像头优化配置
 CAMERA_BUFFER_SIZE = 1  # 摄像头缓冲区大小
 CAMERA_API_PREFERENCE = cv2.CAP_V4L2  # Linux上使用V4L2后端
-CAMERA_FPS_TARGET = 30  # 摄像头目标帧率
+CAMERA_FPS_TARGET = 15  # 摄像头目标帧率（降低以匹配处理能力）
 CAMERA_FOURCC_OPTIONS = ['MJPG', 'YUYV', 'RGB3']  # 优先使用MJPG编码
 
 # 帧率计算类
@@ -142,7 +142,7 @@ class WebPostureMonitor:
         # 初始化处理分辨率
         self.process_width = DEFAULT_PROCESS_WIDTH
         self.process_height = DEFAULT_PROCESS_HEIGHT
-        self.current_resolution_index = 1  # 从中等分辨率开始
+        self.current_resolution_index = 0  # 从最高分辨率开始，确保视觉模型准确性
         self.last_resolution_adjust_time = 0
         self.adaptive_resolution = True  # 是否启用自适应分辨率
         
@@ -580,7 +580,7 @@ class WebPostureMonitor:
             return 0
     
     def _adjust_processing_resolution(self):
-        """根据当前帧率动态调整处理分辨率"""
+        """根据当前帧率动态调整处理分辨率 - 已禁用自动降低以保证识别效果"""
         current_time = time.time()
         
         # 检查是否到达调整间隔
@@ -590,19 +590,20 @@ class WebPostureMonitor:
         capture_fps = self.capture_fps.get_fps()
         process_fps = min(self.pose_process_fps.get_fps(), self.emotion_process_fps.get_fps())
         
-        # 当帧率过低时降低分辨率
-        if process_fps < FPS_THRESHOLD_LOW and self.current_resolution_index < len(RESOLUTION_LEVELS) - 1:
-            self.current_resolution_index += 1
-            self.process_width, self.process_height = RESOLUTION_LEVELS[self.current_resolution_index]
-            print(f"帧率过低 ({process_fps:.1f} FPS)，降低处理分辨率至 {self.process_width}x{self.process_height}")
-            self.last_resolution_adjust_time = current_time
-            
-            # 重置帧率计数器
-            self.pose_process_fps.reset()
-            self.emotion_process_fps.reset()
+        # 禁用自动降低分辨率以保证识别效果 - 只允许提高分辨率
+        # 原代码：当帧率过低时降低分辨率 - 已禁用
+        # if process_fps < FPS_THRESHOLD_LOW and self.current_resolution_index < len(RESOLUTION_LEVELS) - 1:
+        #     self.current_resolution_index += 1
+        #     self.process_width, self.process_height = RESOLUTION_LEVELS[self.current_resolution_index]
+        #     print(f"帧率过低 ({process_fps:.1f} FPS)，降低处理分辨率至 {self.process_width}x{self.process_height}")
+        #     self.last_resolution_adjust_time = current_time
+        #     
+        #     # 重置帧率计数器
+        #     self.pose_process_fps.reset()
+        #     self.emotion_process_fps.reset()
         
         # 当帧率足够高时提高分辨率
-        elif process_fps > FPS_THRESHOLD_HIGH and self.current_resolution_index > 0:
+        if process_fps > FPS_THRESHOLD_HIGH and self.current_resolution_index > 0:
             self.current_resolution_index -= 1
             self.process_width, self.process_height = RESOLUTION_LEVELS[self.current_resolution_index]
             print(f"帧率足够高 ({process_fps:.1f} FPS)，提高处理分辨率至 {self.process_width}x{self.process_height}")
@@ -623,10 +624,12 @@ class WebPostureMonitor:
         if self.performance_stats['processing_times']:
             avg_processing_time = sum(self.performance_stats['processing_times']) / len(self.performance_stats['processing_times'])
         
-        # 处理时间超过帧间时间的90%时需要跳帧
-        frame_time = 1.0 / self.camera_fps if self.camera_fps > 0 else 0.033  # 默认30fps
+        # 获取当前处理FPS
+        current_process_fps = min(self.pose_process_fps.get_fps(), self.emotion_process_fps.get_fps())
         
-        if avg_processing_time > frame_time * 0.9:
+        # 如果处理速度明显低于摄像头产生帧的速度，需要跳帧
+        # 当处理FPS低于摄像头FPS的85%时开始跳帧
+        if current_process_fps > 0 and current_process_fps < self.camera_fps * 0.85:
             # 需要跳帧但不超过最大连续跳帧数
             if self.skip_count < self.max_consecutive_skips:
                 self.skip_count += 1
@@ -708,28 +711,22 @@ class WebPostureMonitor:
                     # 跳过这一帧，但仍提供最后处理的结果给视频流
                     continue
                 
-                # 每隔一段时间检查并调整处理分辨率
-                self._adjust_processing_resolution()
+                # 禁用分辨率调整，保持原始640x480分辨率
+                # self._adjust_processing_resolution()  # 注释掉分辨率调整
                 
                 # 记录处理开始时间
                 process_start_time = time.time()
                 
-                # 调整帧尺寸进行处理 - 根据设置使用跳采样或传统缩放
-                if self.resize_method == 'subsampling':
-                    # 使用跳采样方法以保持原始视角
-                    processed_frame = self._resize_with_subsampling(frame, self.process_width, self.process_height)
-                else:
-                    # 使用传统缩放方法
-                    processed_frame = cv2.resize(frame, (self.process_width, self.process_height))
+                # 保持原始分辨率640x480直接传给视觉模型，不进行任何缩放处理
+                # 为了保证识别效果，使用原始图像进行分析
+                pose_frame = frame.copy()  # 直接使用原始640x480图像
+                emotion_frame = frame.copy()  # 直接使用原始640x480图像
                 
-                pose_frame = processed_frame.copy()
-                emotion_frame = processed_frame.copy()
-                
-                # 处理姿势
+                # 处理姿势 - 使用原始分辨率
                 pose_results = self._process_pose(pose_frame)
                 self.pose_process_fps.update()  # 更新姿势处理帧率
                 
-                # 处理情绪
+                # 处理情绪 - 使用原始分辨率
                 emotion_results = self._process_emotion(emotion_frame)
                 self.emotion_process_fps.update()  # 更新情绪处理帧率
                 
@@ -738,17 +735,21 @@ class WebPostureMonitor:
                 self.performance_stats['processing_times'].append(process_time)
                 
                 # 添加处理时间和分辨率信息到显示帧
-                # 姿势帧显示处理信息
-                size_text = f"{self.process_width}x{self.process_height}"
+                # 显示使用原始分辨率信息
+                size_text = f"{frame.shape[1]}x{frame.shape[0]}"  # 使用实际分辨率
                 cv2.putText(pose_results['display_frame'], 
                           f"Proc: {process_time*1000:.1f}ms {size_text}", 
                           (pose_results['display_frame'].shape[1] - 200, 25), 
                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
                 
                 # 将处理后的帧放入队列供Web端点使用
+                # 重要：为了保证识别效果，向情绪检测传输原始的、未标注的帧
                 if self.video_stream_handler:
+                    # 向姿势队列传输带标注的显示帧（用于Web显示）
                     self.video_stream_handler.add_pose_frame(pose_results['display_frame'])
-                    self.video_stream_handler.add_emotion_frame(emotion_results['display_frame'])
+                    # 向情绪队列传输原始的、未标注的帧（用于情绪检测）
+                    # 使用原始摄像头帧而非处理过的帧，确保情绪检测准确性
+                    self.video_stream_handler.add_emotion_frame(frame)
                 
                 # 更新结果状态
                 self.pose_result = {
@@ -773,7 +774,7 @@ class WebPostureMonitor:
                         'capture_fps': round(self.capture_fps.get_fps(), 1),
                         'pose_process_fps': round(self.pose_process_fps.get_fps(), 1),
                         'emotion_process_fps': round(self.emotion_process_fps.get_fps(), 1),
-                        'process_resolution': f"{self.process_width}x{self.process_height}",
+                        'process_resolution': f"{frame.shape[1]}x{frame.shape[0]}",  # 显示实际使用的原始分辨率
                         'avg_process_time_ms': round(sum(self.performance_stats['processing_times']) / 
                                                    max(1, len(self.performance_stats['processing_times'])) * 1000, 1)
                         if self.performance_stats['processing_times'] else 0

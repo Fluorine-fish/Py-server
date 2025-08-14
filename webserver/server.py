@@ -254,6 +254,44 @@ class WebServer:
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"操作失败: {str(e)}")
 
+        @router.get("/emotion/status")
+        async def get_emotion_status(ctx: AppContext = Depends(get_app_context)):
+            """获取情绪检测状态"""
+            if ctx.emotion_detector is None:
+                raise HTTPException(status_code=503, detail="情绪检测服务未初始化")
+            
+            try:
+                return {
+                    "is_face_detected": ctx.emotion_detector.is_face_detected,
+                    "face_area": ctx.emotion_detector.face_area,
+                    "emotion_type": ctx.emotion_detector.emotion_type,
+                    "emotion_confidence": ctx.emotion_detector.emotion_confidence,
+                    "status": "active" if ctx.emotion_detector.cap is not None else "inactive"
+                }
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"获取情绪检测状态失败: {str(e)}")
+
+        @router.post("/emotion/control/{action}")
+        async def control_emotion_detection(
+            action: str, 
+            ctx: AppContext = Depends(get_app_context)
+        ):
+            """情绪检测控制"""
+            if ctx.emotion_detector is None:
+                raise HTTPException(status_code=503, detail="情绪检测服务未初始化")
+            
+            try:
+                if action == "start":
+                    result = ctx.emotion_detector.start()
+                    return {"status": "success" if result else "failed", "action": action}
+                elif action == "stop":
+                    ctx.emotion_detector.stop()
+                    return {"status": "success", "action": action}
+                else:
+                    raise HTTPException(status_code=400, detail="不支持的操作")
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"操作失败: {str(e)}")
+
         return router
 
     def _add_root_routes(self, app: FastAPI) -> None:
@@ -653,4 +691,42 @@ class WebServer:
     def run(self, host: str = "0.0.0.0", port: int = 8000, reload: bool = False) -> None:
         """启动服务器"""
         import uvicorn
-        uvicorn.run(self.app, host=host, port=port, reload=reload)
+        import logging
+        import sys
+        
+        # 使用最简单的方式启动，避免日志配置冲突
+        try:
+            print(f"正在启动服务器: http://{host}:{port}")
+            
+            # 禁用uvicorn自己的日志配置
+            uvicorn.run(
+                self.app, 
+                host=host, 
+                port=port, 
+                reload=reload,
+                log_config=None,  # 禁用内置日志配置
+                use_colors=False,  # 禁用颜色输出
+                access_log=False   # 禁用访问日志
+            )
+        except Exception as e:
+            print(f"服务器启动失败: {e}")
+            # 最后的备用方案 - 手动创建服务器
+            try:
+                import asyncio
+                import hypercorn.asyncio
+                from hypercorn import Config as HypercornConfig
+                
+                print("尝试使用Hypercorn启动服务器...")
+                config = HypercornConfig()
+                config.bind = [f"{host}:{port}"]
+                asyncio.run(hypercorn.asyncio.serve(self.app, config))
+            except ImportError:
+                print("Hypercorn不可用，尝试直接运行...")
+                # 如果都失败了，至少保持程序运行
+                print("服务器无法启动，但其他服务已初始化完成")
+                try:
+                    while True:
+                        import time
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    print("程序被用户中断")

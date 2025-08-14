@@ -11,9 +11,9 @@ from config import DEBUG
 
 # 帧率和分辨率相关配置
 STREAM_FPS_TARGET = 25  # 目标流帧率
-MAX_QUEUE_SIZE = 10     # 最大队列大小
-DEFAULT_STREAM_WIDTH = 640  # 默认流宽度
-DEFAULT_STREAM_HEIGHT = 480  # 默认流高度
+MAX_QUEUE_SIZE = 100    # 大幅增加队列大小以应对高频帧消费
+DEFAULT_STREAM_WIDTH = 800  # 默认流宽度，使用最高分辨率确保视觉模型准确性
+DEFAULT_STREAM_HEIGHT = 600  # 默认流高度，使用最高分辨率确保视觉模型准确性
 
 # 自适应分辨率配置 - 根据TODO.md更新
 STREAM_RESOLUTION_LEVELS = [
@@ -96,12 +96,12 @@ class VideoStreamHandler:
         # 初始化原始帧属性
         self.last_raw_frame = None
         
-        # 当前流分辨率（可动态调整）
-        self.stream_width = process_width if process_width is not None else DEFAULT_STREAM_WIDTH
-        self.stream_height = process_height if process_height is not None else DEFAULT_STREAM_HEIGHT
-        self.current_resolution_index = self._get_resolution_index()
+        # 当前流分辨率（设置为640x480以匹配原始摄像头分辨率）
+        self.stream_width = 640  # 固定为摄像头原始宽度
+        self.stream_height = 480  # 固定为摄像头原始高度
+        self.current_resolution_index = 1  # 对应640x480在分辨率表中的索引
         self.last_resolution_adjust_time = 0
-        self.adaptive_resolution = True  # 是否启用自适应分辨率
+        self.adaptive_resolution = False  # 禁用自适应分辨率，保持640x480
         
         # 添加resize_method属性
         self.resize_method = 'subsampling'  # 'resize' 或 'subsampling'
@@ -141,15 +141,15 @@ class VideoStreamHandler:
         print("DEBUG: VideoStreamHandler初始化完成")
     
     def _create_default_frame(self):
-        """创建默认空帧（灰色背景）"""
-        frame = np.ones((DEFAULT_STREAM_HEIGHT, DEFAULT_STREAM_WIDTH, 3), dtype=np.uint8) * 200
+        """创建默认空帧（灰色背景），使用640x480分辨率与摄像头保持一致"""
+        frame = np.ones((480, 640, 3), dtype=np.uint8) * 200  # 使用640x480分辨率
         
         # 添加提示文本
         font = cv2.FONT_HERSHEY_SIMPLEX
         text = "等待视频流..."
         text_size = cv2.getTextSize(text, font, 1, 2)[0]
-        text_x = (DEFAULT_STREAM_WIDTH - text_size[0]) // 2
-        text_y = (DEFAULT_STREAM_HEIGHT + text_size[1]) // 2
+        text_x = (640 - text_size[0]) // 2  # 使用实际宽度640
+        text_y = (480 + text_size[1]) // 2  # 使用实际高度480
         
         cv2.putText(frame, text, (text_x, text_y), font, 1, (0, 0, 0), 2)
         
@@ -166,8 +166,8 @@ class VideoStreamHandler:
         Returns:
             带有信息的帧
         """
-        # 创建灰色背景帧
-        frame = np.ones((DEFAULT_STREAM_HEIGHT, DEFAULT_STREAM_WIDTH, 3), dtype=np.uint8) * 220
+        # 创建灰色背景帧，使用640x480分辨率
+        frame = np.ones((480, 640, 3), dtype=np.uint8) * 220
         
         # 添加蓝色标题区域
         cv2.rectangle(frame, (0, 0), (DEFAULT_STREAM_WIDTH, 40), (100, 100, 250), -1)
@@ -193,7 +193,7 @@ class VideoStreamHandler:
     def _get_resolution_index(self):
         """根据当前设置的分辨率获取最接近的索引"""
         min_diff = float('inf')
-        best_index = 1  # 默认中等分辨率
+        best_index = 0  # 默认最高分辨率，确保视觉模型准确性
         
         for i, (width, height) in enumerate(STREAM_RESOLUTION_LEVELS):
             # 计算与当前设置分辨率的差异（像素总数的差异）
@@ -205,42 +205,49 @@ class VideoStreamHandler:
         return best_index
 
     def add_pose_frame(self, frame):
-        """添加姿势分析帧到队列"""
+        """添加姿势帧到队列"""
         if frame is None:
             return
+        
+        # 验证帧有效性
+        if not isinstance(frame, np.ndarray) or frame.size == 0:
+            return
             
-        with self._pose_lock:
-            # 保存原始帧，确保是未经任何处理的原始摄像头图像
-            if frame is not None and frame.size > 0:
-                # 创建一个深拷贝，以确保原始帧不受后续处理的影响
-                self.last_raw_frame = frame.copy()
+        # 更新最后的姿势帧（用于队列为空时的备用）
+        self.last_pose_frame = frame.copy()
             
-            # 处理用于流传输的帧
-            resized_frame = self._prepare_frame_for_streaming(frame)
-            self.last_pose_frame = resized_frame
-            
-            # 尝试向队列添加帧，如果队列满则丢弃旧帧
-            if self.pose_frame_queue.full():
+        try:
+            # 如果队列满了，智能地移除一些旧帧
+            while self.pose_frame_queue.full():
                 try:
-                    self.pose_frame_queue.get_nowait()  # 丢弃最旧的帧
-                    self.performance_stats['dropped_frames'] += 1
+                    # 移除最旧的帧，但保留至少2帧作为缓冲
+                    if self.pose_frame_queue.qsize() > 2:
+                        self.pose_frame_queue.get_nowait()
+                    else:
+                        break  # 保留最后几帧
                 except queue.Empty:
-                    pass
-                    
-            try:
-                self.pose_frame_queue.put_nowait(resized_frame)
-            except queue.Full:
-                # 队列已满，忽略
-                self.performance_stats['dropped_frames'] += 1
-                pass
-    
+                    break
+            
+            # 添加新帧
+            self.pose_frame_queue.put_nowait(frame)
+        except queue.Full:
+            # 如果仍然无法添加，记录但不阻塞
+            self.pose_queue_stats['overrun_count'] += 1
+
     def add_emotion_frame(self, frame):
         """添加情绪分析帧到队列"""
-        if frame is None:
+        if frame is None or frame.size == 0:
             return
             
         with self._emotion_lock:
             resized_frame = self._prepare_frame_for_streaming(frame)
+            
+            # 检查处理后的帧是否有效
+            if resized_frame is None or resized_frame.size == 0:
+                if self.debug:
+                    print("警告：情绪帧处理后无效，跳过添加到队列")
+                return
+                
             self.last_emotion_frame = resized_frame
             
             # 尝试向队列添加帧，如果队列满则丢弃旧帧
@@ -259,11 +266,17 @@ class VideoStreamHandler:
                 pass
     
     def _prepare_frame_for_streaming(self, frame):
-        """准备帧用于流传输（调整尺寸和优化图像）"""
-        if frame is None:
-            return self.default_frame.copy()
+        """准备帧用于流传输（为640x480原始帧保持原样，无需处理）"""
+        if frame is None or frame.size == 0:
+            # 不返回空白帧，而是跳过这次处理
+            return None
             
-        # 调整尺寸以匹配当前流分辨率
+        # 检查输入帧是否为期望的640x480分辨率
+        if frame.shape[1] == 640 and frame.shape[0] == 480:
+            # 原始分辨率640x480，直接返回，无需任何处理
+            return frame
+            
+        # 如果不是640x480，调整为目标分辨率（不应该出现这种情况）
         if frame.shape[1] != self.stream_width or frame.shape[0] != self.stream_height:
             # 根据设置的调整方法选择跳采样或传统缩放
             if self.resize_method == 'subsampling':
@@ -271,30 +284,12 @@ class VideoStreamHandler:
                 frame = self._resize_with_subsampling(frame, self.stream_width, self.stream_height)
             else:
                 # 使用传统缩放方法
-                # 根据当前帧率选择合适的插值方法
-                current_fps = min(self.pose_stream_fps.get_fps(), self.emotion_stream_fps.get_fps())
-                if current_fps < 10:
-                    interpolation = cv2.INTER_NEAREST
-                elif current_fps < 20:
-                    interpolation = cv2.INTER_LINEAR
-                else:
-                    interpolation = cv2.INTER_AREA  # 高帧率时可以使用质量更好的插值方法
-                    
-                frame = cv2.resize(frame, (self.stream_width, self.stream_height), interpolation=interpolation)
-        
-        # 应用优化处理以提高压缩率
-        if self.jpeg_quality < 70:  # 低质量下使用更多优化
-            # 应用轻微的模糊以减少压缩伪影
-            frame = cv2.GaussianBlur(frame, (3, 3), 0)
-            
-            # 可选：降低色彩深度
-            if self.jpeg_quality < 50:
-                frame = cv2.convertScaleAbs(frame, alpha=0.9, beta=10)  # 轻微提高亮度和对比度
+                frame = cv2.resize(frame, (self.stream_width, self.stream_height), interpolation=cv2.INTER_LINEAR)
         
         return frame
     
     def _adjust_stream_resolution(self, pose_fps, emotion_fps):
-        """根据当前帧率动态调整流分辨率"""
+        """根据当前帧率动态调整流分辨率 - 已禁用自动降低以保证识别效果"""
         if not self.adaptive_resolution:
             return
             
@@ -304,19 +299,20 @@ class VideoStreamHandler:
             
         stream_fps = min(pose_fps, emotion_fps)
         
-        # 当流帧率过低时降低分辨率
-        if stream_fps < FPS_THRESHOLD_LOW and self.current_resolution_index < len(STREAM_RESOLUTION_LEVELS) - 1:
-            self.current_resolution_index += 1
-            self.stream_width, self.stream_height = STREAM_RESOLUTION_LEVELS[self.current_resolution_index]
-            print(f"流帧率过低 ({stream_fps:.1f} FPS)，降低分辨率至 {self.stream_width}x{self.stream_height}")
-            self.last_resolution_adjust_time = current_time
-            
-            # 重置帧率计数器以便更准确测量新分辨率下的帧率
-            self.pose_stream_fps.reset()
-            self.emotion_stream_fps.reset()
+        # 禁用自动降低分辨率以保证识别效果 - 只允许提高分辨率
+        # 原代码：当流帧率过低时降低分辨率 - 已禁用
+        # if stream_fps < FPS_THRESHOLD_LOW and self.current_resolution_index < len(STREAM_RESOLUTION_LEVELS) - 1:
+        #     self.current_resolution_index += 1
+        #     self.stream_width, self.stream_height = STREAM_RESOLUTION_LEVELS[self.current_resolution_index]
+        #     print(f"流帧率过低 ({stream_fps:.1f} FPS)，降低分辨率至 {self.stream_width}x{self.stream_height}")
+        #     self.last_resolution_adjust_time = current_time
+        #     
+        #     # 重置帧率计数器以便更准确测量新分辨率下的帧率
+        #     self.pose_stream_fps.reset()
+        #     self.emotion_stream_fps.reset()
         
         # 当流帧率足够高时尝试提高分辨率
-        elif stream_fps > FPS_THRESHOLD_HIGH and self.current_resolution_index > 0:
+        if stream_fps > FPS_THRESHOLD_HIGH and self.current_resolution_index > 0:
             self.current_resolution_index -= 1
             self.stream_width, self.stream_height = STREAM_RESOLUTION_LEVELS[self.current_resolution_index]
             print(f"流帧率足够高 ({stream_fps:.1f} FPS)，提高分辨率至 {self.stream_width}x{self.stream_height}")
@@ -390,8 +386,24 @@ class VideoStreamHandler:
             return frame
         except queue.Empty:
             # 队列为空，返回上一帧
+            # 限制调试信息输出频率，避免日志泛滥
             if self.debug:
-                print("姿势分析帧队列为空，重复使用上一帧")
+                if not hasattr(self, '_empty_queue_count'):
+                    self._empty_queue_count = 0
+                    self._last_empty_log_time = 0
+                
+                current_time = time.time()
+                self._empty_queue_count += 1
+                
+                # 每10秒最多打印一次，或者累计200次空队列后打印一次
+                if (current_time - self._last_empty_log_time > 10.0 or 
+                    self._empty_queue_count % 200 == 0):
+                    if self._empty_queue_count > 1:
+                        queue_size = self.pose_frame_queue.qsize()
+                        print(f"姿势分析帧队列为空，重复使用上一帧 (累计 {self._empty_queue_count} 次，当前队列: {queue_size})")
+                    else:
+                        print("姿势分析帧队列为空，重复使用上一帧")
+                    self._last_empty_log_time = current_time
                 
             # 仍然更新帧率计数器（如果重复使用上一帧也计入）
             self.pose_stream_fps.update()
@@ -802,15 +814,15 @@ class VideoStreamHandler:
                         print("DEBUG: 视频流已停止，结束流生成")
                         break
                 
-                # 控制帧率 - 基于当前系统性能动态调整
+                # 控制帧率 - 基于当前系统性能动态调整，提高生产频率
                 try:
-                    # 低性能设备使用较低帧率
-                    target_fps = min(STREAM_FPS_TARGET, 15)  # 最高15fps以减轻系统负担
-                    sleep_time = max(1.0 / target_fps - 0.01, 0.01)  # 确保至少有一些延迟
+                    # 提高帧率以确保队列有足够的帧供应
+                    target_fps = min(STREAM_FPS_TARGET, 20)  # 提高到20fps以增加帧生产
+                    sleep_time = max(1.0 / target_fps - 0.005, 0.005)  # 减少延迟
                     time.sleep(sleep_time)
                 except:
                     # 出错时使用安全的默认值
-                    time.sleep(0.067)  # 约15fps
+                    time.sleep(0.05)  # 约20fps
                 
             except Exception as e:
                 print(f"ERROR: 生成原始视频流出错: {str(e)}")

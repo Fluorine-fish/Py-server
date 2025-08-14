@@ -10,6 +10,7 @@ class AppContext:
     serial_handler: Optional[object] = None
     chatbot: Optional[object] = None
     detection_service: Optional[object] = None
+    emotion_detector: Optional[object] = None  # 新增情绪检测器字段
 
     # 线程安全的指标存储
     _lock: RLock = field(default_factory=RLock, init=False, repr=False)
@@ -32,5 +33,6 @@ class AppContext:
             "video_stream": self.video_stream is not None,
             "serial_handler": self.serial_handler is not None and getattr(self.serial_handler, 'initialized', False),
             "chatbot": self.chatbot is not None,
-            "detection_service": self.detection_service is not None
+            "detection_service": self.detection_service is not None,
+            "emotion_detector": self.emotion_detector is not None
         }

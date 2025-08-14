@@ -1,0 +1,4 @@
+[submodule "Emotion_Detector"]
+	path = Emotion_Detector
+	url = git@github.com:Fluorine-fish/Emotion-Face_Detector.git
+	branch = main
