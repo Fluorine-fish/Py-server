@@ -318,38 +318,38 @@ class ChatbotService:
                     print("正在请求语音助手自我介绍...")
                     # msg = "你好，请简要介绍一下自己的功能，不要举例,不要使用\"嗨\",不要提到自己机械臂的功能。并且告诉用户，用“你好小灵”来唤醒你"
                     # response = chatbot_service.send_message(msg)
-                    self.speak_text("你好！我是瞳灵智能台灯，我能开关灯光、调节亮度，让房间变亮或者变暗哦！还能控制机械臂把光照到你需要的地方呢！如果有任何需要，请用“你好小灵”来唤醒我!")
+                    self.speak_text("你好！我是瞳灵智能台灯，我能开关灯光、调节亮度，让房间变亮或者变暗哦！还能控制机械臂把光照到你需要的地方呢！")
                 except Exception as e:
                     print(f"语音助手自我介绍时出错: {str(e)}")
-            print("正在监听唤醒词... 按 Ctrl+C 退出")
-            detector.start(sleep_time=0.03, stop_on_detect=True)
-            detector.terminate()
-            print("唤醒词被检测到，开始语音识别...")
-            msg = "你好，小灵"
-            self.send_message(msg) # 语音识别成功的交互
+            # print("正在监听唤醒词... 按 Ctrl+C 退出")
+            # detector.start(sleep_time=0.03, stop_on_detect=True)
+            # detector.terminate()
+            # print("唤醒词被检测到，开始语音识别...")
+            # msg = "你好，小灵"
+            # self.send_message(msg) # 语音识别成功的交互
 
             start_time = datetime.now()
             timeout_seconds = TIME_OUT
 
-            for i in range(30): #允许最多30次对话，对话之后进入休眠
+            for i in range(50): #允许最多30次对话，对话之后进入休眠
                 current_time = datetime.now()
                 elapsed_time = (current_time - start_time).total_seconds()
                 
-                if elapsed_time >= timeout_seconds:
-                    print(f"==>对话超时({timeout_seconds}秒)，助手将进入休眠状态<==")
-                    break
+                # if elapsed_time >= timeout_seconds:
+                #     print(f"==>对话超时({timeout_seconds}秒)，助手将进入休眠状态<==")
+                #     break
 
                 sentence = self.my_agent.get_message()
 
-                if ("休息" in sentence or "结束" in sentence or "退出" in sentence) and AUTO_RETURN:
-                    print("==>检测到结束语，助手将进入休眠状态<==")
-                    break
+                # if ("休息" in sentence or "结束" in sentence or "退出" in sentence) and AUTO_RETURN:
+                #     print("==>检测到结束语，助手将进入休眠状态<==")
+                #     break
                 print(f"==>识别结果：{sentence}<==")
                 self.my_agent.send_message(sentence)
 
-            msg = "小灵先休息啦，有事情可以随时叫我哦！"
-            self.my_agent.speak_text(msg)
-            print("==>对话结束，助手进入休眠状态<==")
+            # msg = "小灵先休息啦，有事情可以随时叫我哦！"
+            # self.my_agent.speak_text(msg)
+            # print("==>对话结束，助手进入休眠状态<==")
             self.loop_cnt += 1
 
     def reset(self):
@@ -609,8 +609,8 @@ def arm_forward():
     print("==>机械臂向前移动<==")
     chatbot = get_chatbot_instance()
     try:
-        msg = "稍等我帮你调整一下哦！"
-        chatbot.speak_text(msg)
+        # msg = "稍等我帮你调整一下哦！"
+        # chatbot.speak_text(msg)
         success = chatbot.serial_handler.send_command(0x30, [0] * 8)
         if success:
             print("串口命令发送成功: 机械臂向前移动")
@@ -627,8 +627,8 @@ def arm_backward():
     print("==>机械臂向后移动<==")
     chatbot = get_chatbot_instance()
     try:
-        msg = "稍等我帮你调整一下哦！"
-        chatbot.speak_text(msg)
+        # msg = "稍等我帮你调整一下哦！"
+        # chatbot.speak_text(msg)
         success = chatbot.serial_handler.send_command(0x31, [0] * 8)
         if success:
             print("串口命令发送成功: 机械臂向后移动")
@@ -645,8 +645,8 @@ def arm_left():
     print("==>机械臂左转<==")
     chatbot = get_chatbot_instance()
     try:
-        msg = "稍等我帮你调整一下哦！"
-        chatbot.speak_text(msg)
+        # msg = "稍等我帮你调整一下哦！"
+        # chatbot.speak_text(msg)
         success = chatbot.serial_handler.send_command(0x32, [0] * 8)
         if success:
             print("串口命令发送成功: 机械臂左转")
@@ -663,8 +663,8 @@ def arm_right():
     print("==>机械臂右转<==")
     chatbot = get_chatbot_instance()
     try:
-        msg = "稍等我帮你调整一下哦！"
-        chatbot.speak_text(msg)
+        # msg = "稍等我帮你调整一下哦！"
+        # chatbot.speak_text(msg)
         success = chatbot.serial_handler.send_command(0x33, [0] * 8)
         if success:
             print("串口命令发送成功: 机械臂右转")
@@ -689,8 +689,8 @@ tools_map = {
     "get_status": get_status,
     "arm_forward": arm_forward,
     "arm_backward": arm_backward,
-    "arm_left": arm_left,
-    "arm_right": arm_right,
+    "arm_left": arm_right,
+    "arm_right": arm_left,
     "reading_mode": reading_mode,
     "learning_mode": learning_mode,  
 }

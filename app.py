@@ -1,24 +1,27 @@
 """
-应用主模块 - 系统入口点，整合各模块创建完整应用
+应用主模块 - 系统入口点，使用FastAPI替换原Flask服务
 """
 import os
-import sys
 import atexit
-from flask import Flask, request, jsonify
 import time
+import threading
+import traceback
 
 # 导入配置
-from config import OPEN_HOST, OPEN_PORT, SERIAL_BAUDRATE, DEBUG_BUTTON_VISIBLE, ENABLE_CHATBOT, ENABLE_WELCOME_MESSAGE, AUTO_START_CHATBOT_LOOP
+from config import (OPEN_HOST, OPEN_PORT, SERIAL_BAUDRATE, DEBUG_BUTTON_VISIBLE, 
+                   ENABLE_CHATBOT, ENABLE_WELCOME_MESSAGE, AUTO_START_CHATBOT_LOOP)
 
 # 导入各个功能模块
 from modules.database_module import init_database
 from modules.video_stream_module import VideoStreamHandler
 from modules.posture_module import WebPostureMonitor, PROCESS_WIDTH, PROCESS_HEIGHT
 from modules.serial_module import SerialCommunicationHandler
-from modules.routes import routes_bp, setup_services
 from modules.detection_module import DetectionService
 from modules.chatbot_module import ChatbotService
-from modules.lamp_control_module import create_lamp_control_blueprint
+
+# WebServer（FastAPI）
+from webserver.context import AppContext
+from webserver.server import WebServer
 
 def create_app():
     """创建并配置Flask应用"""
