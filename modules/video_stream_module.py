@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import time
 import threading
+import traceback
 from collections import deque
 import queue
 from config import DEBUG
@@ -73,12 +74,13 @@ class FPSCounter:
 
 class VideoStreamHandler:
     """视频流处理类"""
-    def __init__(self, process_width=None, process_height=None):
+    def __init__(self, process_width=None, process_height=None, camera_manager=None):
         """初始化视频流处理器
         
         Args:
             process_width: 处理宽度（可选），默认使用DEFAULT_STREAM_WIDTH
             process_height: 处理高度（可选），默认使用DEFAULT_STREAM_HEIGHT
+            camera_manager: 摄像头管理器实例（可选），若未提供则使用全局实例
         """
         print(f"DEBUG: 初始化VideoStreamHandler，宽度={process_width}，高度={process_height}")
         # 初始化队列
@@ -98,6 +100,19 @@ class VideoStreamHandler:
         
         # 当前流分辨率（设置为640x480以匹配原始摄像头分辨率）
         self.stream_width = 640  # 固定为摄像头原始宽度
+        
+        # 获取摄像头管理器实例
+        if camera_manager is None:
+            from modules.camera_manager import get_camera_manager
+            self.camera_manager = get_camera_manager()
+        else:
+            self.camera_manager = camera_manager
+            
+        # 注册为摄像头帧的消费者
+        self.frame_queue = self.camera_manager.register_consumer("video_stream_handler", max_queue_size=10)
+        
+        # 启动帧处理线程
+        threading.Thread(target=self._process_frames, daemon=True, name="VideoStreamProcessor").start()
         self.stream_height = 480  # 固定为摄像头原始高度
         self.current_resolution_index = 1  # 对应640x480在分辨率表中的索引
         self.last_resolution_adjust_time = 0
@@ -141,20 +156,127 @@ class VideoStreamHandler:
         print("DEBUG: VideoStreamHandler初始化完成")
     
     def _create_default_frame(self):
-        """创建默认空帧（灰色背景），使用640x480分辨率与摄像头保持一致"""
-        frame = np.ones((480, 640, 3), dtype=np.uint8) * 200  # 使用640x480分辨率
-        
-        # 添加提示文本
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        text = "等待视频流..."
-        text_size = cv2.getTextSize(text, font, 1, 2)[0]
-        text_x = (640 - text_size[0]) // 2  # 使用实际宽度640
-        text_y = (480 + text_size[1]) // 2  # 使用实际高度480
-        
-        cv2.putText(frame, text, (text_x, text_y), font, 1, (0, 0, 0), 2)
-        
+        """创建默认灰色帧"""
+        # 创建灰色帧
+        frame = np.ones((480, 640, 3), dtype=np.uint8) * 220
+        # 添加文本
+        cv2.putText(frame, "等待视频...", (int(frame.shape[1]/3), int(frame.shape[0]/2)),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (70, 70, 70), 2)
         return frame
         
+    def _add_pose_frame(self, frame):
+        """
+        将帧添加到姿势分析队列
+        
+        Args:
+            frame: 要添加的视频帧
+        """
+        if frame is None or frame.size == 0:
+            return
+            
+        # 调整帧大小，使其适合姿势分析
+        resized_frame = self._prepare_frame_for_streaming(frame)
+        if resized_frame is None:
+            return
+            
+        # 更新最后一帧，便于重复使用
+        self.last_pose_frame = resized_frame
+        
+        # 尝试向队列添加帧，如果队列满则丢弃旧帧
+        if self.pose_frame_queue.full():
+            try:
+                self.pose_frame_queue.get_nowait()  # 丢弃最旧的帧
+                self.performance_stats['dropped_frames'] += 1
+            except queue.Empty:
+                pass
+                
+        try:
+            self.pose_frame_queue.put_nowait(resized_frame)
+        except queue.Full:
+            # 队列已满，忽略
+            self.performance_stats['dropped_frames'] += 1
+            pass
+    
+    def _add_emotion_frame(self, frame):
+        """
+        将帧添加到情绪分析队列
+        
+        Args:
+            frame: 要添加的视频帧
+        """
+        if frame is None or frame.size == 0:
+            return
+            
+        # 调整帧大小，使其适合情绪分析
+        resized_frame = self._prepare_frame_for_streaming(frame)
+        if resized_frame is None:
+            return
+            
+        # 更新最后一帧，便于重复使用
+        self.last_emotion_frame = resized_frame
+        
+        # 尝试向队列添加帧，如果队列满则丢弃旧帧
+        if self.emotion_frame_queue.full():
+            try:
+                self.emotion_frame_queue.get_nowait()  # 丢弃最旧的帧
+                self.performance_stats['dropped_frames'] += 1
+            except queue.Empty:
+                pass
+                
+        try:
+            self.emotion_frame_queue.put_nowait(resized_frame)
+        except queue.Full:
+            # 队列已满，忽略
+            self.performance_stats['dropped_frames'] += 1
+            pass
+            
+    def _process_frames(self):
+        """
+        处理从摄像头管理器接收到的帧
+        将帧分发到姿势和情绪分析队列
+        """
+        print("DEBUG: VideoStreamHandler 帧处理线程启动")
+        
+        while True:
+            try:
+                # 尝试从队列获取最新帧
+                try:
+                    frame = self.frame_queue.get(timeout=0.1)
+                except queue.Empty:
+                    # 队列为空，尝试直接从管理器获取最新帧
+                    frame = self.camera_manager.get_latest_frame()
+                    if frame is None:
+                        time.sleep(0.05)
+                        continue
+                
+                if frame is None or frame.size == 0:
+                    time.sleep(0.05)
+                    continue
+                    
+                # 保存为最新原始帧
+                self.last_raw_frame = frame.copy()
+                
+                # 为姿势分析队列准备帧
+                try:
+                    pose_frame = frame.copy()  # 为姿势分析准备帧副本
+                    self._add_pose_frame(pose_frame)
+                except Exception as e:
+                    print(f"ERROR: 处理姿势帧时出错: {str(e)}")
+                
+                # 为情绪分析队列准备帧
+                try:
+                    emotion_frame = frame.copy()  # 为情绪分析准备帧副本
+                    self._add_emotion_frame(emotion_frame)
+                except Exception as e:
+                    print(f"ERROR: 处理情绪帧时出错: {str(e)}")
+                
+                # 处理完一帧后短暂休眠，避免CPU占用过高
+                time.sleep(0.01)
+            except Exception as e:
+                print(f"ERROR: 帧处理线程异常: {str(e)}")
+                traceback.print_exc()
+                time.sleep(0.1)  # 出错时短暂暂停
+                
     def _create_info_frame(self, title, status_text, info_text):
         """创建信息帧，用于显示状态信息但不传输视频流
         

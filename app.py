@@ -25,6 +25,14 @@ except ImportError as e:
     print(f"警告：检测模块导入失败，跳过检测服务初始化: {e}")
     DetectionService = None
 
+# 尝试导入视频状态路由
+try:
+    from modules.routes.video_status import register_video_status_routes
+    print("视频状态API路由模块导入成功")
+except ImportError as e:
+    print(f"警告：视频状态API路由模块导入失败: {e}")
+    register_video_status_routes = None
+
 # 导入情绪检测模块
 try:
     from Emotion_Detector.EmotionDetector_RKNN import EmotionDetectorRKNN
@@ -45,13 +53,25 @@ def create_services_context() -> AppContext:
     init_database()
     print("数据库初始化完成")
     
+    # 初始化摄像头管理器（全局单例）
+    from modules.camera_manager import get_camera_manager
+    camera_manager = get_camera_manager(
+        init=True,  # 自动初始化并启动
+        camera_id=0, 
+        frame_width=640,
+        frame_height=480,
+        fps_target=30
+    )
+    print("摄像头管理器初始化成功")
+    
     # 初始化视频流处理器
     video_stream_handler = None
     try:
         print("正在初始化视频流处理器...")
         video_stream_handler = VideoStreamHandler(
             process_width=PROCESS_WIDTH,
-            process_height=PROCESS_HEIGHT
+            process_height=PROCESS_HEIGHT,
+            camera_manager=camera_manager  # 传入摄像头管理器
         )
         print("视频流处理器初始化成功")
     except Exception as e:
@@ -62,7 +82,10 @@ def create_services_context() -> AppContext:
     posture_monitor = None
     try:
         print("正在初始化姿势分析器...")
-        posture_monitor = WebPostureMonitor(video_stream_handler=video_stream_handler)
+        posture_monitor = WebPostureMonitor(
+            video_stream_handler=video_stream_handler,
+            camera_manager=camera_manager  # 传入摄像头管理器
+        )
         print("姿势分析器初始化成功")
     except Exception as e:
         print(f"姿势分析器初始化失败: {str(e)}")
@@ -105,12 +128,12 @@ def create_services_context() -> AppContext:
         try:
             print("正在初始化情绪检测服务...")
             emotion_detector = EmotionDetectorRKNN(
-                TPEs=3,  # 使用3个NPU核心
+                TPEs=6,  # 使用3个NPU核心
                 IS_GUI=False,  # 无GUI模式
                 CONFIDENCE_THRESHOLD=0.5,
                 AVERAGE_REPLACE_THRESHOLD=5,
                 TEMP_QUEUE_REPLACE_THRESHOLD=5,
-                is_log_printed=True,
+                is_log_printed=False,
                 video_stream_handler=video_stream_handler  # 传入共享视频流处理器
             )
             
@@ -297,11 +320,20 @@ def main():
     # 创建并启动WebServer
     webserver = WebServer(ctx=ctx, include_mock=True)
     
+    # 注册其他API路由
+    if register_video_status_routes:
+        try:
+            register_video_status_routes(webserver.app)
+            print("视频状态API路由已注册")
+        except Exception as e:
+            print(f"注册视频状态API路由失败: {str(e)}")
+    
     print(f"\n========== 启动Web服务器 ==========")
     print(f"服务器地址: http://{OPEN_HOST}:{OPEN_PORT}")
     print(f"API文档: http://{OPEN_HOST}:{OPEN_PORT}/docs")
     print(f"视频流: http://{OPEN_HOST}:{OPEN_PORT}/api/video")
     print(f"健康检查: http://{OPEN_HOST}:{OPEN_PORT}/api/health")
+    print(f"视频状态: http://{OPEN_HOST}:{OPEN_PORT}/api/video/status")
     print("========================================")
     
     try:

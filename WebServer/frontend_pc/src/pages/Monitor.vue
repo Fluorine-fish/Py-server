@@ -195,7 +195,7 @@ export default {
   data() {
     return {
       activeTab: 0,
-      videoSource: 'https://placehold.co/640x480?text=视频加载中...',
+      videoSource: '',  // 将在mounted中设置
       isVideoLoading: true,
       videoResolution: 'medium',
       networkStatus: {
@@ -240,45 +240,73 @@ export default {
   },
   methods: {
     setupVideoMonitoring() {
-      // 模拟获取视频流
-      setTimeout(() => {
-        this.videoSource = 'https://placehold.co/640x480?text=模拟视频画面';
-        this.isVideoLoading = false;
-      }, 1500);
+      // 使用实际的视频流API
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
+      this.videoSource = `${baseUrl}/api/video?t=${Date.now()}`;
+      this.isVideoLoading = false;
     },
     refreshVideoStream() {
       this.isVideoLoading = true;
       
-      // 模拟刷新视频流
-      setTimeout(() => {
-        this.videoSource = `https://placehold.co/640x480?text=刷新的视频&random=${Date.now()}`;
-        this.isVideoLoading = false;
-      }, 1000);
+      // 先获取摄像头状态
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
+      fetch(`${baseUrl}/api/video/status`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.available) {
+            // 摄像头可用（物理或模拟），显示视频流
+            this.videoSource = `${baseUrl}/api/video?t=${Date.now()}`;
+            
+            // 更新网络状态
+            if (data.mode === "模拟摄像头") {
+              this.networkStatus = {
+                text: '模拟摄像头模式',
+                class: 'warning'
+              };
+            } else {
+              this.networkStatus = {
+                text: '连接正常',
+                class: 'good'
+              };
+            }
+          } else {
+            // 摄像头不可用，显示错误
+            this.handleVideoError();
+          }
+        })
+        .catch(() => {
+          this.handleVideoError();
+        })
+        .finally(() => {
+          setTimeout(() => {
+            this.isVideoLoading = false;
+          }, 500);
+        });
     },
     changeVideoResolution() {
       this.isVideoLoading = true;
       
-      // 模拟切换分辨率
-      let width, height;
+      // 切换分辨率
+      let resolution;
       switch(this.videoResolution) {
         case 'low':
-          width = 360;
-          height = 240;
+          resolution = '360';
           break;
         case 'high':
-          width = 720;
-          height = 480;
+          resolution = '720';
           break;
         default:
-          width = 480;
-          height = 360;
+          resolution = '480';
       }
       
+      // 添加分辨率参数到视频URL
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
+      this.videoSource = `${baseUrl}/api/video?resolution=${resolution}&t=${Date.now()}`;
+      
       setTimeout(() => {
-        this.videoSource = `https://placehold.co/${width}x${height}?text=分辨率${width}x${height}`;
         this.isVideoLoading = false;
         this.updateNetworkStatus();
-      }, 1000);
+      }, 500);
     },
     updateNetworkStatus() {
       switch(this.videoResolution) {
@@ -303,12 +331,20 @@ export default {
       }
     },
     handleVideoError() {
-      this.videoSource = 'https://placehold.co/640x480?text=视频连接失败';
+      // 使用数据URI显示错误（可以在浏览器控制台中查看）
+      const errorDataURI = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQwIiBoZWlnaHQ9IjQ4MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjVmNWY1Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIyNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSI+6KeG6aKR6L+e5o6l5aSx6LSlPC90ZXh0Pjwvc3ZnPg==';
+      this.videoSource = errorDataURI;
+      
       this.isVideoLoading = false;
       this.networkStatus = {
         text: '连接失败',
         class: 'error'
       };
+      
+      console.log("视频流连接失败，3秒后自动重试...");
+      
+      // 3秒后自动重试
+      setTimeout(() => this.refreshVideoStream(), 3000);
     },
     hideVideoLoading() {
       this.isVideoLoading = false;

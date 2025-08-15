@@ -131,7 +131,7 @@ class FPSCounter:
 
 class WebPostureMonitor:
     """适配Web服务的姿势监测器"""
-    def __init__(self, video_stream_handler=None):
+    def __init__(self, video_stream_handler=None, camera_manager=None):
         self.cap = None
         self.pose = None
         self.emotion_analyzer = None
@@ -145,6 +145,19 @@ class WebPostureMonitor:
         self.current_resolution_index = 0  # 从最高分辨率开始，确保视觉模型准确性
         self.last_resolution_adjust_time = 0
         self.adaptive_resolution = True  # 是否启用自适应分辨率
+        
+        # 获取摄像头管理器
+        self.camera_manager = camera_manager
+        if self.camera_manager is None and hasattr(self.video_stream_handler, 'camera_manager'):
+            self.camera_manager = self.video_stream_handler.camera_manager
+        elif self.camera_manager is None:
+            from modules.camera_manager import get_camera_manager
+            self.camera_manager = get_camera_manager()
+        
+        # 从摄像头管理器注册帧队列
+        if self.camera_manager:
+            self.frame_queue = self.camera_manager.register_consumer("posture_monitor", max_queue_size=5)
+            print("DEBUG: 姿势分析器已注册为摄像头帧消费者")
         
         # 初始化摄像头参数
         self.camera_fps = CAMERA_FPS_TARGET
@@ -270,9 +283,18 @@ class WebPostureMonitor:
             return True
             
         self.is_running = True
-        success = self._init_camera()
         
-        if not success or not self.cap or not self.cap.isOpened():
+        # 如果使用摄像头管理器，则不需要初始化摄像头
+        if self.camera_manager:
+            success = True
+            # 为了兼容性，保持cap属性可用
+            self.cap = self.camera_manager.cap if hasattr(self.camera_manager, 'cap') else None
+            print("使用共享摄像头管理器，跳过摄像头初始化")
+        else:
+            # 如果没有摄像头管理器，则使用传统方式初始化摄像头
+            success = self._init_camera()
+        
+        if not success:
             self.is_running = False
             print("无法初始化摄像头，姿势分析系统启动失败")
             return False
@@ -654,47 +676,79 @@ class WebPostureMonitor:
         last_frame_time = time.time()
         last_reconnect_time = time.time()
         
-        while self.is_running and self.cap and self.cap.isOpened():
+        while self.is_running:
             try:
                 current_time = time.time()
                 
-                # 如果摄像头出现多次错误，尝试重新连接摄像头
-                if consecutive_read_failures > 5 and (current_time - self.performance_stats['last_reconnect_time']) > self.performance_stats['reconnect_interval']:
-                    print(f"连续 {consecutive_read_failures} 次读取失败，尝试重新初始化摄像头...")
-                    self.cap.release()
-                    success = self._init_camera()
-                    if not success:
-                        print("重新初始化摄像头失败，暂停1秒后重试")
-                        time.sleep(1)
-                        continue
-                    consecutive_read_failures = 0
-                    self.performance_stats['last_reconnect_time'] = current_time
+                # 获取视频帧 - 优先从摄像头管理器获取
+                frame = None
                 
-                # 使用分离的grab和retrieve方法提高性能
-                if self.use_separate_grab_retrieve:
-                    grabbed = self.cap.grab()
-                    if not grabbed:
-                        consecutive_read_failures += 1
-                        self.performance_stats['camera_errors'] += 1
-                        time.sleep(0.01)
-                        continue
+                if hasattr(self, 'camera_manager') and self.camera_manager:
+                    # 使用摄像头管理器获取帧
+                    try:
+                        # 首先尝试从队列获取
+                        if hasattr(self, 'frame_queue'):
+                            try:
+                                frame = self.frame_queue.get(timeout=0.1)
+                            except queue.Empty:
+                                # 队列为空，直接从管理器获取最新帧
+                                frame = self.camera_manager.get_latest_frame()
+                        else:
+                            # 没有队列，直接获取最新帧
+                            frame = self.camera_manager.get_latest_frame()
+                            
+                        if frame is not None:
+                            consecutive_read_failures = 0
+                    except Exception as e:
+                        print(f"从摄像头管理器获取帧失败: {str(e)}")
+                        frame = None
+                        
+                # 如果从摄像头管理器获取帧失败，尝试直接从摄像头读取（向后兼容）
+                if frame is None and self.cap and self.cap.isOpened():
+                    # 如果摄像头出现多次错误，尝试重新连接摄像头
+                    if consecutive_read_failures > 5 and (current_time - self.performance_stats['last_reconnect_time']) > self.performance_stats['reconnect_interval']:
+                        print(f"连续 {consecutive_read_failures} 次读取失败，尝试重新初始化摄像头...")
+                        self.cap.release()
+                        success = self._init_camera()
+                        if not success:
+                            print("重新初始化摄像头失败，暂停1秒后重试")
+                            time.sleep(1)
+                            continue
+                        consecutive_read_failures = 0
+                        self.performance_stats['last_reconnect_time'] = current_time
                     
-                    ret, frame = self.cap.retrieve()
-                    if not ret:
-                        consecutive_read_failures += 1
-                        self.performance_stats['camera_errors'] += 1
-                        print("无法读取摄像头帧")
-                        time.sleep(0.01)
-                        continue
-                else:
-                    # 常规读取模式
-                    ret, frame = self.cap.read()
-                    if not ret:
-                        consecutive_read_failures += 1
-                        self.performance_stats['camera_errors'] += 1
-                        print("无法读取摄像头帧")
-                        time.sleep(0.01)
-                        continue
+                    # 使用分离的grab和retrieve方法提高性能
+                    if self.use_separate_grab_retrieve:
+                        grabbed = self.cap.grab()
+                        if not grabbed:
+                            consecutive_read_failures += 1
+                            self.performance_stats['camera_errors'] += 1
+                            time.sleep(0.01)
+                            continue
+                        
+                        ret, frame = self.cap.retrieve()
+                        if not ret:
+                            consecutive_read_failures += 1
+                            self.performance_stats['camera_errors'] += 1
+                            print("无法读取摄像头帧")
+                            time.sleep(0.01)
+                            continue
+                    else:
+                        # 常规读取模式
+                        ret, frame = self.cap.read()
+                        if not ret:
+                            consecutive_read_failures += 1
+                            self.performance_stats['camera_errors'] += 1
+                            print("无法读取摄像头帧")
+                            time.sleep(0.01)
+                            continue
+                
+                # 如果所有方法都无法获取帧，则跳过这次循环
+                if frame is None:
+                    consecutive_read_failures += 1
+                    print(f"无法获取有效视频帧，连续失败: {consecutive_read_failures}")
+                    time.sleep(0.1)
+                    continue
                 
                 # 重置错误计数器
                 consecutive_read_failures = 0

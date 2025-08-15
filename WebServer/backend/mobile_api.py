@@ -1,7 +1,18 @@
 from fastapi import APIRouter
 
+# 导入视频流路由
+from .routers.video_stream import router as video_router
+
 # 创建路由器
 router = APIRouter(prefix="/api/data", tags=["mobile_data"])
+
+# 包含视频流路由（不使用前缀，因为video_router已经有/api前缀）
+main_router = APIRouter()
+main_router.include_router(router)  # 数据API
+main_router.include_router(video_router)  # 视频流API
+
+# 导出主路由器
+router = main_router
 
 @router.get('/posture')
 async def posture_data():

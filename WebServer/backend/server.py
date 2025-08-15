@@ -1,14 +1,14 @@
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import RedirectResponse, StreamingResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 import time
 from websocket_manager import manager
-from video_stream import camera
 from user_agents import parse as parse_ua
-from mock_api import router as mock_api_router
-from mobile_api import router as mobile_api_router
+# 导入新的路由模块（替代旧的Flask时期路由）
+from routers.video_stream import router as video_router
+from routers.realtime_data import router as realtime_router
 
 # 创建基础FastAPI应用
 app = FastAPI()
@@ -95,30 +95,11 @@ async def device_info(request: Request):
         'timestamp': time.time()
     }
 
-# MJPEG 视频流
-@app.get('/video')
-async def video_feed():
-    async def generator():
-        while True:
-            frame = camera.read()
-            if frame is None:
-                await asyncio.sleep(0.05)
-                continue
-            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            await asyncio.sleep(0.03)
-    return StreamingResponse(generator(), media_type='multipart/x-mixed-replace; boundary=frame')
+# 旧的向后兼容视频接口由 routers.video_stream 提供，此处移除重复定义
 
-# 包含模拟API路由
-app.include_router(mock_api_router)
-
-# 包含移动端API路由
-app.include_router(mobile_api_router)
-
-# SPA前端路由处理 - 捕获所有移动端路由并重定向到index.html
-@app.get('/mobile/{path:path}', include_in_schema=False)
-async def mobile_spa_routes(path: str):
-    """处理移动端SPA的客户端路由，将所有请求重定向到移动端根目录"""
-    return RedirectResponse('/mobile/')
+# 包含新的API路由（替代旧的Flask时期路由）
+app.include_router(video_router, tags=["视频流"])
+app.include_router(realtime_router, tags=["实时数据"])
 
 # SPA前端路由处理 - 捕获所有PC端路由并重定向到index.html
 @app.get('/pc/{path:path}', include_in_schema=False)

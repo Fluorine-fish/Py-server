@@ -218,42 +218,45 @@ export default {
   },
   methods: {
     initCharts() {
-      // 初始化坐姿饼图
-      const pieCtx = document.getElementById('posturePieChart').getContext('2d');
-      this.charts.posturePie = new Chart(pieCtx, {
-        type: 'doughnut',
-        data: {
-          labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'],
-          datasets: [{
-            data: [64, 18, 12, 6],
-            backgroundColor: [
-              '#34a853',
-              '#fbbc05',
-              '#ff9800',
-              '#ea4335'
-            ],
-            borderWidth: 0
-          }]
-        },
-        options: {
-          cutout: '70%',
-          plugins: {
-            legend: {
-              position: 'bottom',
-              labels: {
-                padding: 20,
-                usePointStyle: true,
-                pointStyle: 'circle'
-              }
-            },
-            tooltip: {
-              callbacks: {
+      try {
+        // 初始化坐姿饼图
+        const pieCtx = document.getElementById('posturePieChart').getContext('2d');
+        this.charts.posturePie = new Chart(pieCtx, {
+          type: 'doughnut',
+          data: {
+            labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'],
+            datasets: [{
+              data: [64, 18, 12, 6],
+              backgroundColor: [
+                '#34a853',
+                '#fbbc05',
+                '#ff9800',
+                '#ea4335'
+              ],
+              borderWidth: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            cutout: '70%',
+            plugins: {
+              legend: {
+                position: 'bottom',
+                labels: {
+                  padding: 20,
+                  usePointStyle: true,
+                  pointStyle: 'circle'
+                }
+              },
+              tooltip: {
+                callbacks: {
                 label: function (context) {
                   return `${context.label}: ${context.raw}%`;
                 }
               }
             }
           },
+          responsive: true,
           maintainAspectRatio: false
         }
       });
@@ -302,6 +305,7 @@ export default {
               }
             }
           },
+          responsive: true,
           maintainAspectRatio: false
         }
       });
@@ -389,6 +393,7 @@ export default {
               position: 'bottom'
             }
           },
+          responsive: true,
           maintainAspectRatio: false
         }
       });
@@ -441,9 +446,14 @@ export default {
               }
             }
           },
+          responsive: true,
           maintainAspectRatio: false
         }
       });
+      } catch (error) {
+        console.error('图表初始化错误:', error);
+        // 如果图表初始化失败，可以显示错误信息或使用备用方案
+      }
     },
     
     resizeCharts() {
@@ -487,35 +497,43 @@ export default {
       }
     },
     updateChartData(stats) {
-      this.stats = stats;
-      
-      // 更新饼图数据 - 实际应用中需要从API获取详细数据
-      // 这里简单模拟一下数据变化
-      if (this.charts.posturePie) {
-        // 保持总和为100%
-        const goodRate = parseInt(stats.goodRate);
-        const badRateTotal = 100 - goodRate;
-        const badRateDistribution = [
-          Math.round(badRateTotal * 0.5), // 轻度不良
-          Math.round(badRateTotal * 0.3), // 中度不良
-          badRateTotal - Math.round(badRateTotal * 0.5) - Math.round(badRateTotal * 0.3) // 严重不良
-        ];
+      try {
+        this.stats = stats;
         
-        this.charts.posturePie.data.datasets[0].data = [
-          goodRate,
-          badRateDistribution[0],
-          badRateDistribution[1],
-          badRateDistribution[2]
-        ];
-        this.charts.posturePie.update();
+        // 更新饼图数据 - 实际应用中需要从API获取详细数据
+        // 这里简单模拟一下数据变化
+        if (this.charts.posturePie) {
+          // 保持总和为100%
+          const goodRate = parseInt(stats.goodRate);
+          const badRateTotal = 100 - goodRate;
+          const badRateDistribution = [
+            Math.round(badRateTotal * 0.5), // 轻度不良
+            Math.round(badRateTotal * 0.3), // 中度不良
+            badRateTotal - Math.round(badRateTotal * 0.5) - Math.round(badRateTotal * 0.3) // 严重不良
+          ];
+          
+          this.charts.posturePie.data.datasets[0].data = [
+            goodRate,
+            badRateDistribution[0],
+            badRateDistribution[1],
+            badRateDistribution[2]
+          ];
+          this.charts.posturePie.update();
+        }
+      } catch (error) {
+        console.error('更新图表数据时出错:', error);
       }
     },
     animateCharts() {
-      // 为图表添加动画效果，使数据更新更加生动
-      for (const key in this.charts) {
-        if (this.charts[key]) {
-          this.charts[key].update('normal');
+      try {
+        // 为图表添加动画效果，使数据更新更加生动
+        for (const key in this.charts) {
+          if (this.charts[key] && typeof this.charts[key].update === 'function') {
+            this.charts[key].update('normal');
+          }
         }
+      } catch (error) {
+        console.error('图表动画更新时出错:', error);
       }
     },
     viewPostureImage(image) {
