@@ -215,6 +215,7 @@
 <script setup>
 import { ref, reactive, onMounted, onBeforeUnmount, nextTick, watch } from 'vue';
 import * as echarts from 'echarts';
+import { monitorApi } from '../api';
 
 // 活动标签页
 const activeTab = ref('trends');
@@ -349,11 +350,11 @@ const initCharts = async () => {
         subtextStyle: { color: '#666', fontSize: 12 }
       },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      legend: { data: ['高兴', '悲伤', '愤怒', '惊讶'], bottom: 0 },
-      grid: { left: '3%', right: '4%', bottom: '15%', containLabel: true },
+      legend: { data: ['高兴', '平静', '悲伤', '愤怒', '惊讶', '专注'], bottom: 0 },
+      grid: { left: '3%', right: '4%', bottom: '18%', containLabel: true },
       xAxis: {
         type: 'category',
-        data: ['上午 (8-12)', '中午 (12-14)', '下午 (14-18)'],
+        data: ['上午', '中午', '下午', '晚上'],
         axisLine: { lineStyle: { color: '#ddd' } },
         axisLabel: { color: '#666' }
       },
@@ -364,13 +365,9 @@ const initCharts = async () => {
         axisLabel: { color: '#666' },
         splitLine: { lineStyle: { color: 'rgba(0, 0, 0, 0.05)' } }
       },
-      series: [
-        { name: '高兴', type: 'bar', stack: '情绪', data: [3, 2, 1], itemStyle: { color: '#4CAF50' } },
-        { name: '悲伤', type: 'bar', stack: '情绪', data: [1, 0, 3], itemStyle: { color: '#F44336' } },
-        { name: '愤怒', type: 'bar', stack: '情绪', data: [0, 1, 2], itemStyle: { color: '#FF9800' } },
-        { name: '惊讶', type: 'bar', stack: '情绪', data: [1, 1, 0], itemStyle: { color: '#FFC107' } }
-      ]
+      series: []
     });
+    await refreshEmotionDistribution();
   }
 
   // 情绪热力图
@@ -463,6 +460,8 @@ watch(activeTab, () => {
 
 onMounted(() => {
   initCharts();
+  // 首次加载拉取情绪分布
+  refreshEmotionDistribution();
   
   // 监听标签切换
   watchActiveTab();
@@ -486,6 +485,36 @@ onBeforeUnmount(() => {
     }
   });
 });
+
+// 拉取后端情绪时段分布并更新柱状图
+async function refreshEmotionDistribution() {
+  try {
+    const resp = await monitorApi.getEmotionDistribution();
+    const timeSlots = resp?.timeSlots || ['上午','中午','下午','晚上'];
+    const emoData = resp?.emotions || {};
+    const mapping = [
+      { key: 'happy', name: '高兴', color: '#4CAF50' },
+      { key: 'neutral', name: '平静', color: '#9E9E9E' },
+      { key: 'sad', name: '悲伤', color: '#F44336' },
+      { key: 'angry', name: '愤怒', color: '#FF9800' },
+      { key: 'surprised', name: '惊讶', color: '#FFC107' },
+      { key: 'focused', name: '专注', color: '#3A86FF' }
+    ];
+    const series = mapping.map(m => ({
+      name: m.name,
+      type: 'bar',
+      stack: '情绪',
+      data: (emoData[m.key] || new Array(timeSlots.length).fill(0)),
+      itemStyle: { color: m.color }
+    }));
+    if (charts.bar) {
+      charts.bar.setOption({ xAxis: { data: timeSlots }, series });
+      setTimeout(() => charts.bar.resize(), 100);
+    }
+  } catch (e) {
+    console.error('获取情绪分布失败:', e);
+  }
+}
 </script>
 
 <style scoped>

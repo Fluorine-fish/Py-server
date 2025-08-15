@@ -527,11 +527,19 @@
 
 /* 图表容器 */
 .chart-container {
-  height: 200px;
+  height: 220px;
   margin-bottom: 16px;
   background: rgba(255, 255, 255, 0.3);
   border-radius: var(--radius-small);
   border: 1px solid rgba(116, 198, 157, 0.2);
+}
+
+/* 让 Chart.js 画布填满容器并可响应尺寸 */
+.chart-container canvas,
+#posturePieChart {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
 }
 
 /* 统计网格 */

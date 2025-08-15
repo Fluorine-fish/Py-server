@@ -103,6 +103,23 @@ class WebServer:
                 print("[WebServer] 成功挂载 mobile_api 路由")
         except Exception as e:
             print(f"[WebServer] 未能挂载 mobile_api 路由：{e}")
+            # 作为降级方案，直接挂载视频流路由，确保 /api/video 可用
+            try:
+                from WebServer.backend.routers import video_router
+                app.include_router(video_router, tags=["Video API"])
+                print("[WebServer] 降级: 成功挂载 video_stream 路由")
+            except Exception as e2:
+                print(f"[WebServer] 降级也失败，未能挂载 video_stream 路由：{e2}")
+
+        # 挂载通用实时数据与视频流路由（提供大页面接口所需的API）
+        try:
+            from WebServer.backend.routers import realtime_router
+            app.include_router(realtime_router, tags=["Realtime API"])
+            print("[WebServer] 成功挂载 realtime_data 路由")
+        except Exception as e:
+            print(f"[WebServer] 未能挂载 realtime_data 路由：{e}")
+
+    # 注意：正常情况下由 mobile_api 统一引入视频流路由
 
         if self.include_mock:
             try:
@@ -129,12 +146,13 @@ class WebServer:
                 "timestamp": __import__('time').time()
             }
 
-        @router.get("/device/status")
+        # 注意：/api/device/status 已由 realtime_data 路由提供
+        # 本地版本保留在 /api/device/status/local 以便调试
+        @router.get("/device/status/local")
         async def get_device_status(ctx: AppContext = Depends(get_app_context)):
             """获取设备状态"""
             metrics = ctx.get_metrics()
             services = ctx.get_service_status()
-            
             return {
                 "online": services.get("video_stream", False),
                 "lastSeen": metrics.get("last_seen"),
@@ -143,105 +161,63 @@ class WebServer:
                 "services": services
             }
 
-        @router.get("/video")
+        @router.get("/video/local")
         async def video_stream_endpoint(ctx: AppContext = Depends(get_app_context)):
-            """视频流接口"""
+            """视频流接口（本地调试版）"""
             try:
                 # 首先尝试使用本地video_stream
                 if ctx.video_stream is not None:
                     def generate_local_mjpeg() -> Generator[bytes, None, None]:
                         try:
                             while True:
-                                # 尝试从video_stream获取帧
                                 frame = None
                                 if hasattr(ctx.video_stream, 'get_latest_frame'):
                                     frame = ctx.video_stream.get_latest_frame()
                                 elif hasattr(ctx.video_stream, 'current_frame'):
                                     frame = ctx.video_stream.current_frame
-                                
-                                if frame is not None:
-                                    # 确保frame是numpy数组
-                                    if isinstance(frame, np.ndarray):
-                                        # 编码为JPEG
-                                        _, buffer = cv2.imencode('.jpg', frame)
-                                        frame_bytes = buffer.tobytes()
-                                        
-                                        yield (b'--frame\r\n'
-                                               b'Content-Type: image/jpeg\r\n\r\n' + 
-                                               frame_bytes + b'\r\n')
-                                else:
-                                    # 如果没有帧，使用空白帧
-                                    blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                                    _, buffer = cv2.imencode('.jpg', blank_frame)
+                                if frame is not None and isinstance(frame, np.ndarray):
+                                    _, buffer = cv2.imencode('.jpg', frame)
                                     frame_bytes = buffer.tobytes()
-                                    
                                     yield (b'--frame\r\n'
-                                           b'Content-Type: image/jpeg\r\n\r\n' + 
-                                           frame_bytes + b'\r\n')
-                                
-                                # 控制帧率
-                                import time
-                                time.sleep(1/30)  # 30fps
+                                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                                else:
+                                    blank = np.zeros((480, 640, 3), dtype=np.uint8)
+                                    _, buffer = cv2.imencode('.jpg', blank)
+                                    yield (b'--frame\r\n'
+                                           b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                                import time; time.sleep(1/30)
                         except Exception as e:
                             print(f"视频流生成错误: {e}")
                             return
-                    
-                    return StreamingResponse(
-                        generate_local_mjpeg(),
-                        media_type="multipart/x-mixed-replace; boundary=frame"
-                    )
-                
-                # 如果本地video_stream不可用，尝试使用WebServer的camera
-                else:
+                    return StreamingResponse(generate_local_mjpeg(), media_type="multipart/x-mixed-replace; boundary=frame")
+                # 使用WebServer摄像头
+                from WebServer.backend.video_stream import camera
+                def generate_webserver_mjpeg() -> Generator[bytes, None, None]:
                     try:
-                        from WebServer.backend.video_stream import camera
-                        
-                        def generate_webserver_mjpeg() -> Generator[bytes, None, None]:
-                            try:
-                                while True:
-                                    frame_bytes = camera.read()
-                                    
-                                    if frame_bytes:
-                                        yield (b'--frame\r\n'
-                                               b'Content-Type: image/jpeg\r\n\r\n' + 
-                                               frame_bytes + b'\r\n')
-                                    else:
-                                        # 如果没有帧，使用空白帧
-                                        blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                                        _, buffer = cv2.imencode('.jpg', blank_frame)
-                                        frame_bytes = buffer.tobytes()
-                                        
-                                        yield (b'--frame\r\n'
-                                               b'Content-Type: image/jpeg\r\n\r\n' + 
-                                               frame_bytes + b'\r\n')
-                                    
-                                    # 控制帧率
-                                    import time
-                                    time.sleep(1/30)  # 30fps
-                            except Exception as e:
-                                print(f"WebServer视频流生成错误: {e}")
-                                return
-                        
-                        return StreamingResponse(
-                            generate_webserver_mjpeg(),
-                            media_type="multipart/x-mixed-replace; boundary=frame"
-                        )
+                        import time
+                        while True:
+                            frame_bytes = camera.read()
+                            if frame_bytes:
+                                yield (b'--frame\r\n'
+                                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                            else:
+                                blank = np.zeros((480, 640, 3), dtype=np.uint8)
+                                _, buffer = cv2.imencode('.jpg', blank)
+                                yield (b'--frame\r\n'
+                                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                            time.sleep(1/30)
                     except Exception as e:
-                        print(f"无法加载WebServer的camera模块: {e}")
-                        raise HTTPException(status_code=503, detail="视频流服务未初始化")
-            
+                        print(f"WebServer视频流生成错误: {e}")
+                        return
+                return StreamingResponse(generate_webserver_mjpeg(), media_type="multipart/x-mixed-replace; boundary=frame")
             except Exception as e:
                 raise HTTPException(status_code=503, detail=f"视频流服务错误: {str(e)}")
 
         @router.post("/control/posture/{action}")
-        async def posture_control(
-            action: str, 
-            ctx: AppContext = Depends(get_app_context)
-        ):
+        async def posture_control(action: str, ctx: AppContext = Depends(get_app_context)):
             """姿势监控控制"""
             if ctx.posture_monitor is None:
                 raise HTTPException(status_code=503, detail="姿势监控服务未初始化")
-            
             try:
                 if action == "start":
                     result = ctx.posture_monitor.start()
@@ -259,7 +235,6 @@ class WebServer:
             """获取情绪检测状态"""
             if ctx.emotion_detector is None:
                 raise HTTPException(status_code=503, detail="情绪检测服务未初始化")
-            
             try:
                 return {
                     "is_face_detected": ctx.emotion_detector.is_face_detected,
@@ -272,14 +247,10 @@ class WebServer:
                 raise HTTPException(status_code=500, detail=f"获取情绪检测状态失败: {str(e)}")
 
         @router.post("/emotion/control/{action}")
-        async def control_emotion_detection(
-            action: str, 
-            ctx: AppContext = Depends(get_app_context)
-        ):
+        async def control_emotion_detection(action: str, ctx: AppContext = Depends(get_app_context)):
             """情绪检测控制"""
             if ctx.emotion_detector is None:
                 raise HTTPException(status_code=503, detail="情绪检测服务未初始化")
-            
             try:
                 if action == "start":
                     result = ctx.emotion_detector.start()
@@ -463,6 +434,133 @@ class WebServer:
                     ws_manager.disconnect(websocket)
                 
             print("[WebServer] 成功挂载WebSocket支持")
+
+            # 兼容前端期望的 /ws/realtime 路径
+            @app.websocket("/ws/realtime")
+            async def websocket_endpoint_realtime(websocket: WebSocket):
+                # 复用相同的管理器与逻辑
+                await ws_manager.connect(websocket)
+                try:
+                    # 发送一次初始化信息（若可获取到上下文）
+                    try:
+                        ctx: AppContext = websocket.app.state.ctx  # type: ignore
+                        await ws_manager.send_personal_message({
+                            "type": "init",
+                            "services": ctx.get_service_status() if ctx else {},
+                            "metrics": ctx.get_metrics() if ctx else {}
+                        }, websocket)
+                    except Exception:
+                        pass
+
+                    while True:
+                        data = await websocket.receive_text()
+                        try:
+                            message = json.loads(data)
+                            await ws_manager.send_personal_message({
+                                "type": "echo",
+                                "message": message
+                            }, websocket)
+                        except Exception as e:
+                            await ws_manager.send_personal_message({
+                                "type": "error",
+                                "message": str(e)
+                            }, websocket)
+                except Exception as e:
+                    print(f"[WebSocket] 错误: {str(e)}")
+                finally:
+                    ws_manager.disconnect(websocket)
+
+            # 启动后台广播任务，定期推送姿势/情绪到所有连接，驱动前端实时更新
+            @app.on_event("startup")
+            async def _start_ws_broadcast_task():
+                import asyncio
+                async def _broadcast_loop():
+                    while True:
+                        try:
+                            ctx: AppContext = app.state.ctx  # type: ignore
+                            posture_score = 50
+                            emotion = "neutral"
+                            emotion_conf = 0.0
+
+                            # 读取姿势分数
+                            try:
+                                pm = getattr(ctx, 'posture_monitor', None)
+                                if pm and hasattr(pm, 'pose_result'):
+                                    pose_res = pm.pose_result or {}
+                                    angle = pose_res.get('angle')
+                                    if angle is None:
+                                        posture_score = 50
+                                    else:
+                                        posture_score = int(max(0, min(100, 100 - angle * 1.2)))
+                            except Exception:
+                                posture_score = 50
+
+                            # 读取情绪
+                            try:
+                                ed = getattr(ctx, 'emotion_detector', None)
+                                if ed and hasattr(ed, 'emotion_type') and hasattr(ed, 'emotion_confidence'):
+                                    emotion = (ed.emotion_type or 'neutral').lower()
+                                    emotion_conf = float(ed.emotion_confidence or 0.0)
+                                else:
+                                    pm = getattr(ctx, 'posture_monitor', None)
+                                    if pm and hasattr(pm, 'emotion_result') and pm.emotion_result:
+                                        raw = pm.emotion_result.get('emotion')
+                                        if isinstance(raw, str):
+                                            emotion = raw.lower()
+                            except Exception:
+                                pass
+
+                            # 统一将unknown/unkown视为neutral
+                            if not emotion or emotion in ("unknown", "unkown"):
+                                emotion = "neutral"
+
+                            # 情绪变化“和缓”：
+                            # - 对置信度做指数平滑
+                            # - 对类别做短暂保持：连续N次不同才切换
+                            state = getattr(app.state, '_emo_state', {
+                                'label': None,
+                                'conf': 0.0,
+                                'pending': None,
+                                'pending_count': 0
+                            })
+                            # 调高平滑系数，使置信度对新值更敏感
+                            alpha = 0.85  # 越大越敏感（此前为0.3 → 0.6 → 0.85）
+                            # 平滑置信度
+                            smoothed_conf = (1 - alpha) * state.get('conf', 0.0) + alpha * (emotion_conf or 0.0)
+                            # 类别：立即切换，最大灵敏度
+                            state['label'] = emotion
+                            state['pending'] = None
+                            state['pending_count'] = 0
+                            state['conf'] = smoothed_conf
+                            app.state._emo_state = state
+
+                            # 当前分数对前端展示+20
+                            posture_score = max(0, min(100, posture_score + 20))
+
+                            payload = {
+                                'timestamp': __import__('time').time(),
+                                'posture_score': posture_score,
+                                'eye_distance': 40,  # 暂无真实用眼模块，使用占位值
+                                'emotion': state['label'],
+                                'emotion_confidence': state['conf']
+                            }
+                            await ws_manager.broadcast(payload)
+                        except Exception as e:
+                            print(f"[WebSocket] 广播错误: {e}")
+                        await asyncio.sleep(1.0)
+
+                # 创建后台任务
+                import asyncio as _asyncio
+                app.state._ws_broadcast_task = _asyncio.create_task(_broadcast_loop())
+
+            @app.on_event("shutdown")
+            async def _stop_ws_broadcast_task():
+                task = getattr(app.state, '_ws_broadcast_task', None)
+                if task:
+                    try:
+                        task.cancel()
+                    except Exception:
+                        pass
         except Exception as e:
             print(f"[WebServer] 无法挂载WebSocket支持: {str(e)}")
     
@@ -471,213 +569,47 @@ class WebServer:
         # 获取路径
         mobile_dist_path = os.path.join(os.path.dirname(__file__), '..', 'WebServer', 'frontend_mobile', 'dist')
         pc_dist_path = os.path.join(os.path.dirname(__file__), '..', 'WebServer', 'frontend_pc', 'dist')
-        
+
         # 调试路径信息
         print(f"[DEBUG] Mobile dist path: {os.path.abspath(mobile_dist_path)}")
         print(f"[DEBUG] Mobile dist exists: {os.path.exists(mobile_dist_path)}")
-        if os.path.exists(mobile_dist_path):
-            assets_path = os.path.join(mobile_dist_path, 'assets')
-            print(f"[DEBUG] Mobile assets path: {os.path.abspath(assets_path)}")
-            print(f"[DEBUG] Mobile assets exists: {os.path.exists(assets_path)}")
-            if os.path.exists(assets_path):
-                print(f"[DEBUG] Mobile assets files: {os.listdir(assets_path)}")
-        
-        # 为移动端创建静态文件处理
-        @app.get("/mobile/assets/{rest_path:path}")
-        async def serve_mobile_assets(rest_path: str):
-            """直接提供移动端资源文件"""
-            try:
-                print(f"[DEBUG] 请求移动端资源: {rest_path}")
-                file_path = os.path.join(mobile_dist_path, "assets", rest_path)
-                print(f"[DEBUG] 完整文件路径: {file_path}")
-                print(f"[DEBUG] 文件是否存在: {os.path.exists(file_path)}")
-                print(f"[DEBUG] 是否为文件: {os.path.isfile(file_path) if os.path.exists(file_path) else 'N/A'}")
-                
-                if not os.path.exists(file_path) or not os.path.isfile(file_path):
-                    print(f"[ERROR] 资源文件不存在: {rest_path} -> {file_path}")
-                    raise HTTPException(status_code=404, detail=f"资源文件不存在: {rest_path}")
-                    
-                # 确定MIME类型
-                mime_type = "application/octet-stream"
-                if rest_path.endswith(".js"):
-                    mime_type = "application/javascript"
-                elif rest_path.endswith(".css"):
-                    mime_type = "text/css"
-                elif rest_path.endswith(".svg"):
-                    mime_type = "image/svg+xml"
-                elif rest_path.endswith(".png"):
-                    mime_type = "image/png"
-                elif rest_path.endswith(".jpg") or rest_path.endswith(".jpeg"):
-                    mime_type = "image/jpeg"
-                    
-                print(f"[DEBUG] MIME类型: {mime_type}")
-                    
-                # 读取文件内容
-                with open(file_path, "rb") as f:
-                    content = f.read()
-                    
-                print(f"[DEBUG] 文件大小: {len(content)} bytes")
-                return Response(content=content, media_type=mime_type)
-            except Exception as e:
-                print(f"提供移动端资源文件时出错: {str(e)}")
-                raise HTTPException(status_code=500, detail=str(e))
-            
-        @app.get("/mobile/charts/{rest_path:path}")
-        async def serve_mobile_charts(rest_path: str):
-            """直接提供移动端图表文件"""
-            try:
-                file_path = os.path.join(mobile_dist_path, "charts", rest_path)
-                if not os.path.exists(file_path) or not os.path.isfile(file_path):
-                    raise HTTPException(status_code=404, detail=f"图表文件不存在: {rest_path}")
-                    
-                # 确定MIME类型
-                mime_type = "application/octet-stream"
-                if rest_path.endswith(".svg"):
-                    mime_type = "image/svg+xml"
-                elif rest_path.endswith(".png"):
-                    mime_type = "image/png"
-                elif rest_path.endswith(".jpg") or rest_path.endswith(".jpeg"):
-                    mime_type = "image/jpeg"
-                    
-                # 读取文件内容
-                with open(file_path, "rb") as f:
-                    content = f.read()
-                    
-                return Response(content=content, media_type=mime_type)
-            except Exception as e:
-                print(f"提供移动端图表文件时出错: {str(e)}")
-                raise HTTPException(status_code=500, detail=str(e))
-        
-        # 挂载移动端资源目录到根路径，保持兼容性
-        @app.get("/mobile_assets/{rest_path:path}")
-        async def serve_root_mobile_assets(rest_path: str):
-            """直接提供根路径下的移动端资源文件（兼容性）"""
-            try:
-                file_path = os.path.join(mobile_dist_path, "assets", rest_path)
-                if not os.path.exists(file_path) or not os.path.isfile(file_path):
-                    raise HTTPException(status_code=404, detail=f"资源文件不存在: {rest_path}")
-                    
-                # 确定MIME类型
-                mime_type = "application/octet-stream"
-                if rest_path.endswith(".js"):
-                    mime_type = "application/javascript"
-                elif rest_path.endswith(".css"):
-                    mime_type = "text/css"
-                elif rest_path.endswith(".svg"):
-                    mime_type = "image/svg+xml"
-                elif rest_path.endswith(".png"):
-                    mime_type = "image/png"
-                elif rest_path.endswith(".jpg") or rest_path.endswith(".jpeg"):
-                    mime_type = "image/jpeg"
-                    
-                # 读取文件内容
-                with open(file_path, "rb") as f:
-                    content = f.read()
-                    
-                return Response(content=content, media_type=mime_type)
-            except Exception as e:
-                print(f"提供根路径移动端资源文件时出错: {str(e)}")
-                raise HTTPException(status_code=500, detail=str(e))
-        
-        @app.get("/mobile_charts/{rest_path:path}")
-        async def serve_root_mobile_charts(rest_path: str):
-            """直接提供根路径下的移动端图表文件（兼容性）"""
-            try:
-                file_path = os.path.join(mobile_dist_path, "charts", rest_path)
-                if not os.path.exists(file_path) or not os.path.isfile(file_path):
-                    raise HTTPException(status_code=404, detail=f"图表文件不存在: {rest_path}")
-                    
-                # 确定MIME类型
-                mime_type = "application/octet-stream"
-                if rest_path.endswith(".svg"):
-                    mime_type = "image/svg+xml"
-                elif rest_path.endswith(".png"):
-                    mime_type = "image/png"
-                elif rest_path.endswith(".jpg") or rest_path.endswith(".jpeg"):
-                    mime_type = "image/jpeg"
-                    
-                # 读取文件内容
-                with open(file_path, "rb") as f:
-                    content = f.read()
-                    
-                return Response(content=content, media_type=mime_type)
-            except Exception as e:
-                print(f"提供根路径移动端图表文件时出错: {str(e)}")
-                raise HTTPException(status_code=500, detail=str(e))
-            
-        # 为PC端创建静态文件处理
-        @app.get("/pc/assets/{rest_path:path}")
-        async def serve_pc_assets(rest_path: str):
-            """直接提供PC端资源文件"""
-            try:
-                file_path = os.path.join(pc_dist_path, "assets", rest_path)
-                if not os.path.exists(file_path) or not os.path.isfile(file_path):
-                    raise HTTPException(status_code=404, detail=f"资源文件不存在: {rest_path}")
-                    
-                # 确定MIME类型
-                mime_type = "application/octet-stream"
-                if rest_path.endswith(".js"):
-                    mime_type = "application/javascript"
-                elif rest_path.endswith(".css"):
-                    mime_type = "text/css"
-                elif rest_path.endswith(".svg"):
-                    mime_type = "image/svg+xml"
-                elif rest_path.endswith(".png"):
-                    mime_type = "image/png"
-                elif rest_path.endswith(".jpg") or rest_path.endswith(".jpeg"):
-                    mime_type = "image/jpeg"
-                    
-                # 读取文件内容
-                with open(file_path, "rb") as f:
-                    content = f.read()
-                    
-                return Response(content=content, media_type=mime_type)
-            except Exception as e:
-                print(f"提供PC端资源文件时出错: {str(e)}")
-                raise HTTPException(status_code=500, detail=str(e))
-        
-        # 挂载PC端资源目录到根路径，保持兼容性
-        @app.get("/assets/{rest_path:path}")
-        async def serve_root_pc_assets(rest_path: str):
-            """直接提供根路径下的PC端资源文件（兼容性）"""
-            try:
-                file_path = os.path.join(pc_dist_path, "assets", rest_path)
-                if not os.path.exists(file_path) or not os.path.isfile(file_path):
-                    raise HTTPException(status_code=404, detail=f"资源文件不存在: {rest_path}")
-                    
-                # 确定MIME类型
-                mime_type = "application/octet-stream"
-                if rest_path.endswith(".js"):
-                    mime_type = "application/javascript"
-                elif rest_path.endswith(".css"):
-                    mime_type = "text/css"
-                elif rest_path.endswith(".svg"):
-                    mime_type = "image/svg+xml"
-                elif rest_path.endswith(".png"):
-                    mime_type = "image/png"
-                elif rest_path.endswith(".jpg") or rest_path.endswith(".jpeg"):
-                    mime_type = "image/jpeg"
-                    
-                # 读取文件内容
-                with open(file_path, "rb") as f:
-                    content = f.read()
-                    
-                return Response(content=content, media_type=mime_type)
-            except Exception as e:
-                print(f"提供根路径PC端资源文件时出错: {str(e)}")
-                raise HTTPException(status_code=500, detail=str(e))
-        
+
+        # 使用 StaticFiles 挂载静态资源，避免阻塞事件循环
+        try:
+            mobile_assets = os.path.join(mobile_dist_path, 'assets')
+            mobile_charts = os.path.join(mobile_dist_path, 'charts')
+            pc_assets = os.path.join(pc_dist_path, 'assets')
+            static_root = os.path.join(os.path.dirname(__file__), '..', 'static')
+
+            if os.path.isdir(mobile_assets):
+                app.mount("/mobile/assets", StaticFiles(directory=mobile_assets), name="mobile_assets")
+                # 兼容旧路径
+                app.mount("/mobile_assets", StaticFiles(directory=mobile_assets), name="mobile_assets_compat")
+            if os.path.isdir(mobile_charts):
+                app.mount("/mobile/charts", StaticFiles(directory=mobile_charts), name="mobile_charts")
+                # 兼容旧路径
+                app.mount("/mobile_charts", StaticFiles(directory=mobile_charts), name="mobile_charts_compat")
+            if os.path.isdir(pc_assets):
+                app.mount("/pc/assets", StaticFiles(directory=pc_assets), name="pc_assets")
+                # 兼容旧路径（PC端构建通常在根用 /assets 引用）
+                app.mount("/assets", StaticFiles(directory=pc_assets), name="pc_assets_root")
+            # 提供通用静态目录（用于姿态图片等）
+            if os.path.isdir(static_root):
+                app.mount("/static", StaticFiles(directory=static_root), name="static_root")
+        except Exception as e:
+            print(f"[WebServer] 挂载静态资源失败: {e}")
+
         # 打印成功信息
         if os.path.exists(mobile_dist_path):
             print(f"[WebServer] 成功设置移动端前端路径: {mobile_dist_path}")
         else:
             print(f"[WebServer] 警告: 移动端前端构建目录不存在: {mobile_dist_path}")
-            
+
         if os.path.exists(pc_dist_path):
             print(f"[WebServer] 成功设置PC端前端路径: {pc_dist_path}")
         else:
             print(f"[WebServer] 警告: PC端前端构建目录不存在: {pc_dist_path}")
-            
+
         # 添加重定向路由
         @app.get("/redirect")
         async def redirect_to_client(request: Request):
@@ -713,13 +645,15 @@ class WebServer:
             # 最后的备用方案 - 手动创建服务器
             try:
                 import asyncio
-                import hypercorn.asyncio
-                from hypercorn import Config as HypercornConfig
-                
+                # 动态导入以避免静态检查错误
+                _hypercorn = __import__('hypercorn')
+                _asyncio_mod = __import__('hypercorn.asyncio', fromlist=['asyncio'])
+                HypercornConfig = getattr(__import__('hypercorn', fromlist=['Config']), 'Config')
+
                 print("尝试使用Hypercorn启动服务器...")
                 config = HypercornConfig()
                 config.bind = [f"{host}:{port}"]
-                asyncio.run(hypercorn.asyncio.serve(self.app, config))
+                asyncio.run(_asyncio_mod.serve(self.app, config))
             except ImportError:
                 print("Hypercorn不可用，尝试直接运行...")
                 # 如果都失败了，至少保持程序运行

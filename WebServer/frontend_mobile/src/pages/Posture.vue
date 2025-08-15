@@ -26,6 +26,25 @@
                     </div>
                   </div>
                 </div>
+  
+                <!-- 图像记录 tab -->
+                <div v-if="activeTab==='images'" class="mobile-card">
+                  <div class="mobile-card-header">
+                    <div class="mobile-card-title">图像记录</div>
+                  </div>
+                  <div class="mobile-card-content">
+                    <div v-if="loadingImages" style="text-align:center;padding:12px;color:#666">加载中...</div>
+                    <div v-else class="image-grid">
+                      <div v-for="img in postureImages" :key="img.id" class="image-item" @click="viewImage(img)">
+                        <img :src="img.thumbnail" alt="posture" />
+                        <div class="image-time">{{ new Date(img.timestamp).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) }}</div>
+                      </div>
+                    </div>
+                    <div v-if="!loadingImages && hasMoreImages" style="text-align:center;margin-top:8px">
+                      <button class="load-more" @click="loadMoreImages">加载更多</button>
+                    </div>
+                  </div>
+                </div>
                 
                 <!-- 坐姿数据区域（在视频下方） -->
                 <div class="stats-horizontal-unified">
@@ -107,7 +126,7 @@
             <div class="mobile-card-content">
               <!-- 饼图容器 - 按照图示风格 -->
               <div class="chart-container-styled">
-                <canvas id="posturePieChart"></canvas>
+                <canvas id="posturePieChart" ref="pieCanvas"></canvas>
               </div>
               
               <!-- 图例说明 - 包含数值的2x2布局 -->
@@ -118,15 +137,15 @@
                 </div>
                 <div class="legend-item-styled">
                   <span class="legend-dot mild"></span>
-                  <span class="legend-text-with-value">轻度不良 {{ (parseFloat(postureStats.badTime) * 0.3).toFixed(1) }}h</span>
+                  <span class="legend-text-with-value">轻度不良 {{ mildHours }}h</span>
                 </div>
                 <div class="legend-item-styled">
                   <span class="legend-dot moderate"></span>
-                  <span class="legend-text-with-value">中度不良 {{ (parseFloat(postureStats.badTime) * 0.5).toFixed(1) }}h</span>
+                  <span class="legend-text-with-value">中度不良 {{ moderateHours }}h</span>
                 </div>
                 <div class="legend-item-styled">
                   <span class="legend-dot severe"></span>
-                  <span class="legend-text-with-value">严重不良 {{ (parseFloat(postureStats.badTime) * 0.2).toFixed(1) }}h</span>
+                  <span class="legend-text-with-value">严重不良 {{ severeHours }}h</span>
                 </div>
               </div>
               
@@ -220,6 +239,8 @@ const monitorStore = useMonitorStore()
 
 // Chart实例
 let pieChartInstance = null
+const pieCanvas = ref(null)
+const handleResize = () => pieChartInstance?.resize()
 let barChartInstance = null
 
 // tab控制
@@ -229,24 +250,18 @@ const activeTab = ref('proportion')
 const selectedTimeRange = ref('day')
 const timePeriod = ref('today') // 新增饼图时间段切换状态
 
-// 基于时间段的坐姿数据
+// 基于时间段的坐姿数据（将由后端真实数据填充）
 const postureDataByPeriod = ref({
-  today: {
-    labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'],
-    data: [64, 18, 12, 6]
-  },
-  week: {
-    labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'], 
-    data: [71, 16, 9, 4]
-  }
+  today: { labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'], data: [0, 0, 0, 0], rawSeconds: [0,0,0,0], totalSeconds: 0 },
+  week: { labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'], data: [0, 0, 0, 0], rawSeconds: [0,0,0,0], totalSeconds: 0 }
 })
 
 // 坐姿数据相关状态
 const postureStats = ref({
-  goodTime: '3.2',
-  mildTime: '1.2',
-  badTime: '0.6',
-  goodRate: '64'
+  goodTime: '0.0',
+  mildTime: '0.0',
+  badTime: '0.0',
+  goodRate: '0'
 })
 
 const problemTimeSlot = ref('下午3-5点')
@@ -261,6 +276,7 @@ const currentReminderInterval = ref(60) // 当前生效的提醒间隔，默认1
 const postureImages = ref([])
 const loadingImages = ref(false)
 const currentPage = ref(1)
+const hasMoreImages = ref(true)
 
 // 坐姿状态相关
 const postureStatusClass = computed(() => {
@@ -272,11 +288,12 @@ const postureStatusClass = computed(() => {
 })
 
 const postureStatusText = computed(() => {
-  const score = monitorStore.postureData.currentScore
-  if (score === null) return '等待检测'
-  if (score >= 80) return '坐姿良好'
-  if (score >= 60) return '姿势稍差'
-  return '姿势不佳'
+  const s = monitorStore.postureData.currentScore
+  if (s === null) return '等待检测'
+  if (s > 70) return '优秀'
+  if (s > 62) return '及格'
+  if (s >= 55) return '一般'
+  return '需纠正'
 })
 
 // 动态计算当前时间段的数据百分比
@@ -284,11 +301,28 @@ const currentPeriodData = computed(() => {
   const data = postureDataByPeriod.value[timePeriod.value]
   if (!data) return { good: 0, mild: 0, moderate: 0, severe: 0 }
   return {
-    good: data.data[0],
-    mild: data.data[1], 
-    moderate: data.data[2],
-    severe: data.data[3]
+    good: data.data[0] || 0,
+    mild: data.data[1] || 0, 
+    moderate: data.data[2] || 0,
+    severe: data.data[3] || 0
   }
+})
+
+// 各等级对应的时长（小时），来自后端 rawSeconds
+const mildHours = computed(() => {
+  const data = postureDataByPeriod.value[timePeriod.value]
+  const s = data?.rawSeconds?.[1] || 0
+  return (s/3600).toFixed(1)
+})
+const moderateHours = computed(() => {
+  const data = postureDataByPeriod.value[timePeriod.value]
+  const s = data?.rawSeconds?.[2] || 0
+  return (s/3600).toFixed(1)
+})
+const severeHours = computed(() => {
+  const data = postureDataByPeriod.value[timePeriod.value]
+  const s = data?.rawSeconds?.[3] || 0
+  return (s/3600).toFixed(1)
 })
 
 // 视频URL
@@ -301,65 +335,104 @@ const changeTimeRange = (range) => {
 }
 
 // 新增：饼图时间段切换方法
-const changeTimePeriod = (period) => {
+const changeTimePeriod = async (period) => {
   timePeriod.value = period
+  await fetchPostureData(period)
   updatePieChart(period)
 }
 
 // 更新饼图数据
+const normKey = (p) => (p === 'day' ? 'today' : p)
 const updatePieChart = (period) => {
-  if (pieChartInstance && postureDataByPeriod.value[period]) {
-    const data = postureDataByPeriod.value[period]
+  const key = normKey(period)
+  if (pieChartInstance && postureDataByPeriod.value[key]) {
+    const data = postureDataByPeriod.value[key]
     pieChartInstance.data.datasets[0].data = data.data
     pieChartInstance.update('active')
   }
 }
 
-// 获取坐姿数据
+// 获取坐姿数据（真实后端）
 const fetchPostureData = async (range) => {
   try {
-    // 这里应该调用API获取不同时间范围的数据
-    // 先使用模拟数据
-    const mockData = {
-      day: {
-        goodTime: '3.2',
-        mildTime: '1.2', 
-        badTime: '0.6',
-        goodRate: '64'
-      },
-      week: {
-        goodTime: '22.4',
-        mildTime: '8.4',
-        badTime: '4.2', 
-        goodRate: '68'
-      },
-      month: {
-        goodTime: '89.6',
-        mildTime: '33.6',
-        badTime: '16.8',
-        goodRate: '66'
-      }
+  const map = { today: 'day', week: 'week', day: 'day' }
+  const timeRange = map[range] || 'day'
+    const res = await fetch(`/api/monitor/posture/distribution?timeRange=${timeRange}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    // data: { labels, data:[%], rawSeconds:[good,mild,moderate,severe], totalSeconds }
+    const labels = Array.isArray(data.labels) ? data.labels.map(l=>{
+      // PC返回的中文短标签，映射为移动端显示
+      if (l === '良好') return '良好坐姿'
+      if (l === '轻度') return '轻度不良'
+      if (l === '中度') return '中度不良'
+      if (l === '重度') return '严重不良'
+      return l
+    }) : ['良好坐姿','轻度不良','中度不良','严重不良']
+    const percents = Array.isArray(data.data) ? data.data : [0,0,0,0]
+    const raw = Array.isArray(data.rawSeconds) ? data.rawSeconds : [0,0,0,0]
+    const [goodS=0, mildS=0, moderateS=0, severeS=0] = raw
+    const badS = mildS + moderateS + severeS
+    const h = (s)=> (s/3600).toFixed(1)
+
+  // 更新period缓存（统一键为today/week）
+  const key = normKey(range)
+  postureDataByPeriod.value[key] = {
+      labels,
+      data: percents,
+      rawSeconds: raw,
+      totalSeconds: data.totalSeconds || (goodS+badS)
     }
-    
-    postureStats.value = mockData[range]
+
+    // 更新饼图
+  updatePieChart(key)
+
+    // 更新底部统计
+    postureStats.value = {
+      goodTime: h(goodS),
+      mildTime: h(mildS),
+      badTime: h(badS),
+      goodRate: String(percents[0] || 0)
+    }
   } catch (error) {
     console.error('获取坐姿数据失败:', error)
-    showNotify({ type: 'danger', message: '数据加载失败' })
+    showNotify({ type: 'warning', message: '坐姿占比数据暂不可用' })
   }
 }
 
 // 初始化图表
-const initCharts = () => {
+const initCharts = async () => {
   // 初始化坐姿饼图 - 按照图示风格配置
-  const pieCtx = document.getElementById('posturePieChart')
-  if (pieCtx) {
+  await nextTick()
+  const canvasEl = pieCanvas.value || document.getElementById('posturePieChart')
+  // 等待画布可见且有尺寸
+  const waitForSize = async () => new Promise(resolve => {
+    let attempts = 0
+    const tick = () => {
+      attempts++
+      const el = canvasEl
+      if (el && el.offsetWidth > 0 && el.offsetHeight > 0) return resolve()
+      if (attempts > 20) return resolve()
+      requestAnimationFrame(tick)
+    }
+    tick()
+  })
+  await waitForSize()
+
+  if (canvasEl) {
     const currentData = postureDataByPeriod.value[timePeriod.value]
-    pieChartInstance = new Chart(pieCtx, {
+    // 如已存在则销毁，避免重复实例
+    if (pieChartInstance) {
+      try { pieChartInstance.destroy() } catch (e) {}
+      pieChartInstance = null
+    }
+    const ctx = canvasEl.getContext('2d')
+  pieChartInstance = new Chart(ctx, {
       type: 'doughnut',
       data: {
         labels: currentData.labels,
         datasets: [{
-          data: currentData.data,
+      data: currentData.data,
           backgroundColor: [
             '#4CAF50',  // 绿色 - 良好坐姿
             '#FFC107',  // 黄色 - 轻度不良  
@@ -374,8 +447,8 @@ const initCharts = () => {
       },
       options: {
         cutout: '65%',
-        responsive: true,
-        maintainAspectRatio: true,
+  responsive: true,
+  maintainAspectRatio: false,
         plugins: {
           legend: {
             display: false  // 隐藏默认图例，使用自定义图例
@@ -415,6 +488,8 @@ const initCharts = () => {
         }
       }
     })
+  // 初始后进行一次尺寸校正
+  try { pieChartInstance.resize() } catch (e) {}
   }
   
   // 初始化柱状图
@@ -529,24 +604,41 @@ const setReminderInterval = (minutes) => {
   showReminderPopup.value = false
 }
 
-// 图像相关方法
-const loadMoreImages = () => {
-  currentPage.value++
-  // 这里应该加载更多图像
+// 图像相关方法（真实后端）
+const fetchImages = async () => {
+  try{
+    loadingImages.value = true
+    const res = await fetch(`/api/monitor/posture/images?page=${currentPage.value}&limit=8`)
+    const json = await res.json()
+    const arr = Array.isArray(json) ? json : (json.data || [])
+    if(currentPage.value===1) postureImages.value = []
+    postureImages.value.push(...arr.map(it=>({
+      id: it.id,
+      url: it.url,
+      thumbnail: it.thumbnail || it.url,
+      timestamp: it.timestamp
+    })))
+    hasMoreImages.value = arr.length === 8
+  }catch(e){
+    console.error('加载图像失败', e)
+  }finally{
+    loadingImages.value = false
+  }
 }
-
-const viewImage = (image) => {
-  // 查看大图
-  console.log('查看图像:', image)
-}
+const loadMoreImages = async () => { currentPage.value++; await fetchImages() }
+const viewImage = (image) => { window.open(image.url, '_blank') }
 
 // 生命周期
 onMounted(async () => {
   await monitorStore.fetchPostureData()
-  await fetchPostureData(selectedTimeRange.value)
-  
-  await nextTick()
-  initCharts()
+  // 预拉取“今日”和“本周”的真实数据
+  await fetchPostureData('today')
+  await fetchPostureData('week')
+  await initCharts()
+  // 预加载图像列表
+  await fetchImages()
+  // 监听窗口尺寸变化，保持自适应
+  window.addEventListener('resize', handleResize)
 })
 
 onBeforeUnmount(() => {
@@ -556,10 +648,17 @@ onBeforeUnmount(() => {
   if (barChartInstance) {
     barChartInstance.destroy()
   }
+  window.removeEventListener('resize', handleResize)
 })
 </script>
 
 <style scoped>
+/* 简易图片网格 */
+.image-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+.image-item{ position:relative; border-radius:8px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,.06); }
+.image-item img{ width:100%; height:120px; object-fit:cover; display:block; }
+.image-item .image-time{ position:absolute; right:6px; bottom:6px; background:rgba(0,0,0,.55); color:#fff; font-size:12px; padding:2px 6px; border-radius:4px; }
+.load-more{ background:#fff; border:1px solid #e0e0e0; padding:6px 12px; border-radius:6px; }
 /* 工具区域标题样式 */
 .tools-header {
   margin-bottom: 12px;
@@ -727,6 +826,9 @@ onBeforeUnmount(() => {
 }
 
 #posturePieChart {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
   max-width: 240px;
   max-height: 240px;
 }

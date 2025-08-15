@@ -43,7 +43,25 @@
             <div class="network-status">
               <span class="status-label">网络状态:</span>
               <span class="status-value" :class="networkStatus.class">{{ networkStatus.text }}</span>
+                <span class="divider">|</span>
+                <span class="status-label">实时数据:</span>
+                <span class="status-value" :class="wsConnected ? 'good' : 'error'">{{ wsConnected ? '已连接' : '未连接，重试中…' }}</span>
             </div>
+
+              <!-- 实时消息（来自 WebSocket） -->
+              <div class="realtime-messages">
+                <div class="rtm-header">
+                  <div class="rtm-title">实时消息</div>
+                  <div class="rtm-count" v-if="messages.length">{{ messages.length }} 条</div>
+                </div>
+                <div class="rtm-empty" v-if="messages.length === 0">暂无实时消息</div>
+                <div class="rtm-list" v-else>
+                  <div class="rtm-item" v-for="m in messages" :key="m.id">
+                    <div class="rtm-time">{{ m.time }}</div>
+                    <div class="rtm-text">{{ m.text }}</div>
+                  </div>
+                </div>
+              </div>
           </div>
         </div>
         
@@ -63,11 +81,11 @@
                 </div>
                 <div class="status-item">
                   <div class="status-label">情绪状态</div>
-                  <div class="status-value">专注</div>
+                  <div class="status-value">{{ emotionLabel }}</div>
                 </div>
                 <div class="status-item">
                   <div class="status-label">坐姿状态</div>
-                  <div class="status-value">良好</div>
+                  <div class="status-value">{{ postureLabel }}</div>
                 </div>
                 <div class="status-item">
                   <div class="status-label">持续学习时间</div>
@@ -202,6 +220,15 @@ export default {
         text: '良好',
         class: 'good'
       },
+      ws: null,
+      wsConnected: false,
+      latestRealtime: {
+        posture_score: null,
+        eye_distance: null,
+        emotion: null,
+        timestamp: null
+      },
+      messages: [],
       messageContent: '',
       isScheduled: false,
       scheduleDate: this.getTodayDate(),
@@ -213,7 +240,7 @@ export default {
         '需要帮助吗？',
         '该吃饭了，下来吧'
       ],
-      messageHistory: [
+  messageHistory: [
         {
           content: '别忘了做数学作业',
           time: '今天 14:30',
@@ -237,8 +264,66 @@ export default {
   },
   mounted() {
     this.setupVideoMonitoring();
+    this.initRealtime();
+  },
+  beforeUnmount() {
+    if (this.ws) {
+      try { this.ws.close(); } catch (e) {}
+      this.ws = null;
+    }
+  },
+  computed: {
+    emotionLabel() {
+      const e = (this.latestRealtime.emotion || '').toLowerCase();
+      const map = {
+        happy: '愉悦',
+        neutral: '平静',
+        sad: '低落',
+        angry: '生气',
+        focused: '专注'
+      };
+      return map[e] || (e ? e : '未知');
+    },
+    postureLabel() {
+      const s = this.latestRealtime.posture_score;
+      if (s == null) return '未知';
+  // 阈值规则：>70 优秀，>62 及格，>=55 一般，否则 需纠正
+  if (s > 70) return '优秀';
+  if (s > 62) return '及格';
+  if (s >= 55) return '一般';
+  return '需纠正';
+    }
   },
   methods: {
+    initRealtime() {
+      const url = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/realtime`;
+      const ws = new WebSocket(url);
+      this.ws = ws;
+      ws.onopen = () => { this.wsConnected = true; };
+      ws.onclose = () => {
+        this.wsConnected = false;
+        // 指数退避简单实现：2s 后重连
+        setTimeout(() => this.initRealtime(), 2000);
+      };
+      ws.onerror = () => { this.wsConnected = false; };
+      ws.onmessage = (evt) => {
+        try {
+          const d = JSON.parse(evt.data);
+          // 更新最新态
+          this.latestRealtime = {
+            posture_score: d.posture_score ?? this.latestRealtime.posture_score,
+            eye_distance: d.eye_distance ?? this.latestRealtime.eye_distance,
+            emotion: d.emotion ?? this.latestRealtime.emotion,
+            timestamp: d.timestamp ?? Date.now()/1000
+          };
+          // 记录消息
+          const time = new Date((d.timestamp || Date.now()/1000) * 1000).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+          const text = JSON.stringify({ posture: d.posture_score, eye: d.eye_distance, emotion: d.emotion });
+          this.messages.unshift({ id: `${Date.now()}-${Math.random()}`, time, text });
+          if (this.messages.length > 50) this.messages.pop();
+        } catch (e) { /* ignore parse error */ }
+      };
+    },
     setupVideoMonitoring() {
       // 使用实际的视频流API
       const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
@@ -612,6 +697,24 @@ export default {
 .status-value {
   font-weight: 600;
 }
+
+.divider { color:#ccc; }
+
+.realtime-messages { 
+  margin-top: 10px; 
+  background: #fafafa; 
+  border-radius: 8px; 
+  border: 1px solid #eee; 
+  padding: 10px; 
+}
+.rtm-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.rtm-title { font-weight:600; color:#333; }
+.rtm-count { font-size:12px; color:#999; }
+.rtm-empty { color:#999; font-style: italic; }
+.rtm-list { max-height: 160px; overflow:auto; display:flex; flex-direction:column; gap:6px; }
+.rtm-item { display:flex; gap:10px; font-size:12px; }
+.rtm-time { color:#666; width:72px; flex: 0 0 auto; }
+.rtm-text { color:#333; word-break: break-all; }
 
 .status-value.good {
   color: #34a853;

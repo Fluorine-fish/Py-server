@@ -38,15 +38,15 @@
         </div>
         <div class="stats-grid">
           <div class="stat-item">
-            <div class="stat-value">3.2h</div>
+            <div class="stat-value">{{ stats.goodPostureHours }}</div>
             <div class="stat-label">良好坐姿</div>
           </div>
           <div class="stat-item">
-            <div class="stat-value">1.8h</div>
+            <div class="stat-value">{{ stats.badPostureHours }}</div>
             <div class="stat-label">不良坐姿</div>
           </div>
           <div class="stat-item">
-            <div class="stat-value">64%</div>
+            <div class="stat-value">{{ stats.goodRate }}</div>
             <div class="stat-label">良好率</div>
           </div>
         </div>
@@ -81,7 +81,7 @@
       <div class="card">
         <div class="card-header">
           <div class="card-title">提醒响应情况</div>
-          <div class="card-icon">�</div>
+          <div class="card-icon">🔔</div>
         </div>
         <div class="chart-container">
           <canvas id="radarChart"></canvas>
@@ -155,36 +155,7 @@ export default {
         badPostureHours: '1.8h',
         goodRate: '64%'
       },
-      postureImages: [
-        {
-          id: 1,
-          image_path: 'https://placehold.co/150x120/4285f4/ffffff?text=良好坐姿',
-          posture_status: '良好坐姿',
-          timestamp: new Date().toISOString(),
-          is_bad_posture: false
-        },
-        {
-          id: 2,
-          image_path: 'https://placehold.co/150x120/ea4335/ffffff?text=不良坐姿',
-          posture_status: '不良坐姿',
-          timestamp: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-          is_bad_posture: true
-        },
-        {
-          id: 3,
-          image_path: 'https://placehold.co/150x120/4285f4/ffffff?text=良好坐姿',
-          posture_status: '良好坐姿',
-          timestamp: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
-          is_bad_posture: false
-        },
-        {
-          id: 4,
-          image_path: 'https://placehold.co/150x120/fbbc05/ffffff?text=需改进',
-          posture_status: '需改进坐姿',
-          timestamp: new Date(Date.now() - 1000 * 60 * 90).toISOString(),
-          is_bad_posture: true
-        }
-      ],
+  postureImages: [],
       charts: {
         posturePie: null,
         scoreTrend: null,
@@ -199,6 +170,7 @@ export default {
       setTimeout(() => {
         this.initCharts();
         this.loadPostureData();
+  this.loadLatestImages();
       }, 300);
     });
     
@@ -217,6 +189,23 @@ export default {
     window.removeEventListener('resize', this.resizeCharts);
   },
   methods: {
+    async loadLatestImages(){
+      try{
+        const res = await fetch('/api/monitor/posture/images?page=1&limit=4');
+        const json = await res.json();
+        // 兼容两种返回格式：{data: [...]} 或直接数组
+        const arr = Array.isArray(json) ? json : (json.data || []);
+        this.postureImages = arr.map(it=>({
+          id: it.id,
+          image_path: it.thumbnail || it.url,
+          posture_status: it.posture_type || (it.is_good_posture===false? '不良坐姿':'坐姿记录'),
+          timestamp: it.timestamp || new Date().toISOString(),
+          is_bad_posture: it.is_good_posture===false
+        }));
+      }catch(e){
+        console.error('加载坐姿图像失败: ', e);
+      }
+    },
     initCharts() {
       try {
         // 初始化坐姿饼图
@@ -226,7 +215,8 @@ export default {
           data: {
             labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'],
             datasets: [{
-              data: [64, 18, 12, 6],
+              // 初始置零，加载后端数据后再更新
+              data: [0, 0, 0, 0],
               backgroundColor: [
                 '#34a853',
                 '#fbbc05',
@@ -238,6 +228,7 @@ export default {
           },
           options: {
             responsive: true,
+            maintainAspectRatio: false,
             cutout: '70%',
             plugins: {
               legend: {
@@ -250,16 +241,16 @@ export default {
               },
               tooltip: {
                 callbacks: {
-                label: function (context) {
-                  return `${context.label}: ${context.raw}%`;
+                  label: function (context) {
+                    return `${context.label}: ${context.raw}%`;
+                  }
                 }
               }
             }
-          },
-          responsive: true,
-          maintainAspectRatio: false
-        }
-      });
+          }
+        });
+      // 初始化后立即拉取一次后端数据以填充饼图与统计
+      this.loadPostureDistribution();
       
       // 初始化坐姿评分趋势图
       const trendCtx = document.getElementById('scoreTrendChart').getContext('2d');
@@ -466,60 +457,58 @@ export default {
     changeTimeRange(range) {
       this.currentTimeRange = range;
       this.loadPostureData();
+      // 切换时间范围时同时刷新饼图分布
+      this.loadPostureDistribution();
       
       // 更新图表数据显示
       this.animateCharts();
     },
     loadPostureData() {
-      // 此处应调用API获取数据，这里模拟数据
-      console.log(`加载${this.currentTimeRange}时间范围的坐姿数据`);
-      
-      // 根据选择的时间范围更新统计数据
-      if (this.currentTimeRange === 'week') {
+      // 仍保留其他卡片的模拟更新；饼图与统计改为走后端
+      console.log(`加载${this.currentTimeRange}时间范围的数据`);
+    },
+    async loadPostureDistribution() {
+      try {
+        const params = new URLSearchParams({ timeRange: this.currentTimeRange });
+        const res = await fetch(`/api/monitor/posture/distribution?${params.toString()}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        // data: { labels, data:[%], rawSeconds:[good,mild,moderate,severe], totalSeconds }
+        const labels = Array.isArray(data.labels) ? data.labels : ['良好坐姿','轻度不良','中度不良','严重不良'];
+        let percents = Array.isArray(data.data) ? data.data : [0,0,0,0];
+        const raw = Array.isArray(data.rawSeconds) ? data.rawSeconds : [0,0,0,0];
+        const [goodS=0, mildS=0, moderateS=0, severeS=0] = raw;
+        const badS = mildS + moderateS + severeS;
+        const fmtH = (sec) => `${(sec/3600).toFixed(1)}h`;
+
+        // 若后端暂无数据导致全为0，设置一个可视化占位，避免饼图看起来空白
+        if ((goodS + badS) === 0 || (percents.reduce((a,b)=>a+b,0) === 0)) {
+          percents = [100,0,0,0];
+        }
+
+        // 更新统计卡片
         this.updateChartData({
-          goodPostureHours: '22.5h',
-          badPostureHours: '12.3h',
-          goodRate: '65%'
+          goodPostureHours: fmtH(goodS),
+          badPostureHours: fmtH(badS),
+          goodRate: `${(percents[0] || 0)}%`
         });
-      } else if (this.currentTimeRange === 'month') {
-        this.updateChartData({
-          goodPostureHours: '89.6h',
-          badPostureHours: '42.8h',
-          goodRate: '67%'
-        });
-      } else {
-        // 今日数据
-        this.updateChartData({
-          goodPostureHours: '3.2h',
-          badPostureHours: '1.8h',
-          goodRate: '64%'
-        });
+
+        // 更新饼图
+        if (this.charts.posturePie) {
+          this.charts.posturePie.data.labels = labels;
+          this.charts.posturePie.data.datasets[0].data = percents;
+          this.charts.posturePie.update();
+        }
+      } catch (err) {
+        console.error('加载坐姿时间占比失败，使用占位：', err);
+        // 保底：不修改现有图，避免打断用户
       }
     },
     updateChartData(stats) {
       try {
         this.stats = stats;
         
-        // 更新饼图数据 - 实际应用中需要从API获取详细数据
-        // 这里简单模拟一下数据变化
-        if (this.charts.posturePie) {
-          // 保持总和为100%
-          const goodRate = parseInt(stats.goodRate);
-          const badRateTotal = 100 - goodRate;
-          const badRateDistribution = [
-            Math.round(badRateTotal * 0.5), // 轻度不良
-            Math.round(badRateTotal * 0.3), // 中度不良
-            badRateTotal - Math.round(badRateTotal * 0.5) - Math.round(badRateTotal * 0.3) // 严重不良
-          ];
-          
-          this.charts.posturePie.data.datasets[0].data = [
-            goodRate,
-            badRateDistribution[0],
-            badRateDistribution[1],
-            badRateDistribution[2]
-          ];
-          this.charts.posturePie.update();
-        }
+        // 饼图数据已由 loadPostureDistribution 进行更新
       } catch (error) {
         console.error('更新图表数据时出错:', error);
       }

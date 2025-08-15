@@ -7,34 +7,7 @@
           <div class="mobile-card-header green-gradient">
             <div class="mobile-card-title main-title-large">坐姿检测</div>
             <div class="refresh-button" @click="refreshData">
-         // 坐姿状态相关
-const postureStatusClass = computed(() => {
-  const score = monitorStore.postureData.currentScore;
-  if (score === null) return '';
-  if (score >= 80) return 'status-good';
-  if (score >= 60) return 'status-warning';
-  return 'status-bad';
-});
-
-const postureStatusText = computed(() => {
-  const score = monitorStore.postureData.currentScore;
-  if (score === null) return '等待检测';
-  if (score >= 80) return '坐姿良好';
-  if (score >= 60) return '姿势稍差';
-  return '姿势不佳';
-});
-
-// 动态计算当前时间段的数据百分比
-const currentPeriodData = computed(() => {
-  const data = postureDataByPeriod.value[timePeriod.value];
-  if (!data) return { good: 0, mild: 0, moderate: 0, severe: 0 };
-  return {
-    good: data.data[0],
-    mild: data.data[1], 
-    moderate: data.data[2],
-    severe: data.data[3]
-  };
-});
+              <i class="bi bi-arrow-clockwise"></i>
             </div>
           </div>
           <div class="mobile-card-content">
@@ -166,7 +139,7 @@ const currentPeriodData = computed(() => {
             </div>
             <div class="mobile-card-content">
               <div class="chart-container">
-                <canvas id="posturePieChart"></canvas>
+                <canvas id="posturePieChart" ref="pieCanvas"></canvas>
               </div>
               
               <!-- 统计标签 - 带背景和加粗字体 -->
@@ -343,7 +316,7 @@ const currentPeriodData = computed(() => {
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useMonitorStore } from '../stores';
 import Chart from 'chart.js/auto';
 import { showToast, showImagePreview } from 'vant';
@@ -351,6 +324,7 @@ import './PostureStyle.vue'; // 导入样式
 
 const monitorStore = useMonitorStore();
 let pieChartInstance = null;
+const pieCanvas = ref(null);
 let barChartInstance = null;
 
 // 添加视频地址和刷新功能
@@ -410,11 +384,12 @@ const postureStatusClass = computed(() => {
 });
 
 const postureStatusText = computed(() => {
-  const score = monitorStore.postureData.currentScore;
-  if (score === null) return '未检测';
-  if (score >= 80) return '良好姿势';
-  if (score >= 60) return '请注意坐姿';
-  return '不良姿势';
+  const s = monitorStore.postureData.currentScore;
+  if (s === null) return '未检测';
+  if (s > 70) return '优秀';
+  if (s > 62) return '及格';
+  if (s >= 55) return '一般';
+  return '需纠正';
 });
 
 const postureScoreClass = computed(() => {
@@ -611,12 +586,33 @@ const getImageStatusText = (score) => {
 };
 
 // 初始化图表
-const initCharts = () => {
+const initCharts = async () => {
   // 初始化坐姿饼图 - 完全照搬HTML中的实现，使用响应式数据
-  const pieCtx = document.getElementById('posturePieChart');
-  if (pieCtx) {
+  await nextTick();
+  const canvasEl = pieCanvas.value || document.getElementById('posturePieChart');
+  // 等待 canvas 可见且有尺寸
+  const waitForSize = async () => new Promise(resolve => {
+    let attempts = 0;
+    const tick = () => {
+      attempts++;
+      const el = canvasEl;
+      if (el && el.offsetWidth > 0 && el.offsetHeight > 0) return resolve();
+      if (attempts > 20) return resolve();
+      requestAnimationFrame(tick);
+    };
+    tick();
+  });
+  await waitForSize();
+
+  if (canvasEl) {
     const currentData = postureDataByPeriod.value[timePeriod.value];
-    pieChartInstance = new Chart(pieCtx, {
+    // 防重复
+    if (pieChartInstance) {
+      try { pieChartInstance.destroy(); } catch (e) {}
+      pieChartInstance = null;
+    }
+    const ctx = canvasEl.getContext('2d');
+    pieChartInstance = new Chart(ctx, {
       type: 'doughnut',
       data: {
         labels: currentData.labels,
@@ -666,7 +662,7 @@ const initCharts = () => {
             }
           }
         },
-        maintainAspectRatio: false,
+  maintainAspectRatio: false,
         responsive: true,
         interaction: {
           intersect: false
@@ -677,7 +673,8 @@ const initCharts = () => {
           duration: 1000
         }
       }
-    });
+  });
+  try { pieChartInstance.resize(); } catch (e) {}
   }
   
   // 初始化柱状图

@@ -95,6 +95,26 @@ export const monitorApi = {
   // 获取情绪数据
   getEmotionData() {
     return api.get('/monitor/emotion');
+  },
+
+  // 获取情绪时段分布
+  getEmotionDistribution(params) {
+    return api.get('/monitor/emotion/distribution', { params });
+  },
+
+  // 获取情绪趋势
+  getEmotionTrends(params) {
+    return api.get('/monitor/emotion/trends', { params });
+  },
+
+  // 获取情绪雷达
+  getEmotionRadar(params) {
+    return api.get('/monitor/emotion/radar', { params });
+  },
+
+  // 获取情绪热力图
+  getEmotionHeatmap(params) {
+    return api.get('/monitor/emotion/heatmap', { params });
   }
 };
 

@@ -342,11 +342,12 @@ const postureStatusClass = computed(() => {
 })
 
 const postureStatusText = computed(() => {
-  const score = monitorStore.postureData.currentScore
-  if (score === null) return '等待检测'
-  if (score >= 80) return '坐姿良好'
-  if (score >= 60) return '姿势稍差'
-  return '姿势不佳'
+  const s = monitorStore.postureData.currentScore
+  if (s === null) return '等待检测'
+  if (s > 70) return '优秀'
+  if (s > 62) return '及格'
+  if (s >= 55) return '一般'
+  return '需纠正'
 })
 
 // 动态计算当前时间段的数据百分比
@@ -496,75 +497,6 @@ const initCharts = () => {
     barChartInstance = new Chart(barCtx, {
       type: 'bar',
       data: {
-        labels: Array.from({ length: 12 }, (_, i) => `${i*2}-${i*2+2}h`),
-        datasets: [{
-          label: '不良坐姿次数',
-          data: [2, 1, 0, 3, 4, 2, 1, 0, 5, 3, 1, 0],
-          backgroundColor: '#3b82f6',
-          borderRadius: 4,
-          borderSkipped: false
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            display: false
-          },
-          tooltip: {
-            backgroundColor: 'rgba(0, 0, 0, 0.8)',
-            titleColor: '#fff',
-            bodyColor: '#fff',
-            cornerRadius: 8,
-            titleFont: {
-              weight: '600'
-            },
-            bodyFont: {
-              weight: '500'
-            },
-            callbacks: {
-              label: function(context) {
-                return `${context.raw}次不良姿势`
-              }
-            }
-          }
-        },
-        scales: {
-          x: {
-            grid: {
-              display: false
-            },
-            ticks: {
-              color: '#9ca3af',
-              font: {
-                size: 11,
-                weight: '500'
-              },
-              maxRotation: 45
-            }
-          },
-          y: {
-            grid: {
-              color: 'rgba(156, 163, 175, 0.2)'
-            },
-            ticks: {
-              color: '#9ca3af',
-              font: {
-                size: 11,
-                weight: '500'
-              }
-            }
-          }
-        },
-        animation: {
-          duration: 1000,
-          easing: 'easeOutQuart'
-        }
-      }
-    })
-  }
-}
         labels: Array.from({ length: 12 }, (_, i) => `${i*2}-${i*2+2}h`),
         datasets: [{
           label: '不良坐姿次数',

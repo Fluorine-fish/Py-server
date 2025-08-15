@@ -284,7 +284,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useMonitorStore } from '../stores'
 import { showNotify } from 'vant'
 import Chart from 'chart.js/auto'
@@ -302,19 +302,35 @@ const activeTab = ref('proportion')
 
 // 时间范围控制
 const selectedTimeRange = ref('day')
-const timePeriod = ref('today') // 新增饼图时间段切换状态
+const timePeriod = ref('today') // 新增饼图时间段切换状态（today|week）
 
 // 基于时间段的坐姿数据
 const postureDataByPeriod = ref({
   today: {
     labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'],
-    data: [64, 18, 12, 6]
+    data: [0, 0, 0, 0]
   },
   week: {
     labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'], 
-    data: [71, 16, 9, 4]
+    data: [0, 0, 0, 0]
   }
 })
+
+// period → backend timeRange
+const periodToTimeRange = (period) => (period === 'today' ? 'day' : 'week')
+
+// 拉取饼图数据
+const loadPieData = async (period) => {
+  try {
+    const timeRange = periodToTimeRange(period)
+    const resp = await monitorStore.fetchPostureTimeDistribution(timeRange)
+    const labels = resp?.labels || ['良好坐姿','轻度不良','中度不良','严重不良']
+    const data = Array.isArray(resp?.data) ? resp.data : [0,0,0,0]
+    postureDataByPeriod.value[period] = { labels, data }
+  } catch (e) {
+    console.error('加载饼图数据失败:', e)
+  }
+}
 
 // 坐姿数据相关状态
 const postureStats = ref({
@@ -342,11 +358,12 @@ const postureStatusClass = computed(() => {
 })
 
 const postureStatusText = computed(() => {
-  const score = monitorStore.postureData.currentScore
-  if (score === null) return '等待检测'
-  if (score >= 80) return '坐姿良好'
-  if (score >= 60) return '姿势稍差'
-  return '姿势不佳'
+  const s = monitorStore.postureData.currentScore
+  if (s === null) return '等待检测'
+  if (s > 70) return '优秀'
+  if (s > 62) return '及格'
+  if (s >= 55) return '一般'
+  return '需纠正'
 })
 
 // 动态计算当前时间段的数据百分比
@@ -374,8 +391,9 @@ const changeTimeRange = (range) => {
 }
 
 // 新增：饼图时间段切换方法
-const changeTimePeriod = (period) => {
+const changeTimePeriod = async (period) => {
   timePeriod.value = period
+  await loadPieData(period)
   updatePieChart(period)
 }
 
@@ -422,11 +440,13 @@ const fetchPostureData = async (range) => {
 }
 
 // 初始化图表
-const initCharts = () => {
+const initCharts = async () => {
   // 初始化坐姿饼图 - 按照图示风格配置
   const pieCtx = document.getElementById('posturePieChart')
   if (pieCtx) {
-    const currentData = postureDataByPeriod.value[timePeriod.value]
+  // 先拉取一次后端数据
+  await loadPieData(timePeriod.value)
+  const currentData = postureDataByPeriod.value[timePeriod.value]
     pieChartInstance = new Chart(pieCtx, {
       type: 'doughnut',
       data: {
@@ -600,7 +620,14 @@ onMounted(async () => {
   await fetchPostureData(selectedTimeRange.value)
   
   await nextTick()
-  initCharts()
+  await initCharts()
+  // 当切换到“坐姿分析”tab时，若图表未创建则初始化
+  watch(() => activeTab.value, async (v) => {
+    if (v === 'proportion' && !pieChartInstance) {
+      await nextTick()
+      await initCharts()
+    }
+  })
 })
 
 onBeforeUnmount(() => {

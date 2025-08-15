@@ -345,11 +345,12 @@ const postureStatusClass = computed(() => {
 })
 
 const postureStatusText = computed(() => {
-  const score = monitorStore.postureData.currentScore
-  if (score === null) return '等待检测'
-  if (score >= 80) return '坐姿良好'
-  if (score >= 60) return '姿势稍差'
-  return '姿势不佳'
+  const s = monitorStore.postureData.currentScore
+  if (s === null) return '等待检测'
+  if (s > 70) return '优秀'
+  if (s > 62) return '及格'
+  if (s >= 55) return '一般'
+  return '需纠正'
 })
 
 // 动态计算当前时间段的数据百分比

@@ -144,11 +144,12 @@ export const useMonitorStore = defineStore('monitor', {
     },
     
     postureStatus: (state) => {
-      const score = state.postureData.currentScore;
-      if (score === null) return '未检测';
-      if (score >= 80) return '良好';
-      if (score >= 60) return '一般';
-      return '不良';
+      const s = state.postureData.currentScore;
+      if (s === null) return '未检测';
+      if (s > 70) return '优秀';
+      if (s > 62) return '及格';
+      if (s >= 55) return '一般';
+      return '需纠正';
     },
     
     emotionLabel: (state) => {

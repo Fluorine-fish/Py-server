@@ -62,6 +62,21 @@ def init_database():
                 notes TEXT
             )
         """)
+
+        # 创建情绪时间记录表
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS emotion_time_records (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                start_time DATETIME(6) NOT NULL,
+                end_time DATETIME(6) NOT NULL,
+                duration_seconds FLOAT NOT NULL,
+                dominant_emotion ENUM('happy','neutral','sad','angry','surprised','fearful','disgusted','focused','unknown') NOT NULL,
+                confidence FLOAT DEFAULT 0,
+                notes TEXT
+            )
+            """
+        )
         
         conn.commit()
         cursor.close()
@@ -833,6 +848,106 @@ def get_hourly_posture_data(start_time, end_time):
         import traceback
         traceback.print_exc()
         return []
+
+def record_emotion_time(start_time, end_time, duration_seconds, dominant_emotion, confidence=0.0, notes=""):
+    """记录情绪时间段
+    Args:
+        start_time: 开始时间 (datetime)
+        end_time: 结束时间 (datetime)
+        duration_seconds: 持续时间(秒)
+        dominant_emotion: 主导情绪 (枚举/字符串)
+        confidence: 置信度[0,1]
+        notes: 备注
+    Returns:
+        成功返回记录ID，失败返回None
+    """
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+
+        sql = (
+            """
+            INSERT INTO emotion_time_records
+            (start_time, end_time, duration_seconds, dominant_emotion, confidence, notes)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """
+        )
+        cursor.execute(sql, (start_time, end_time, duration_seconds, dominant_emotion, confidence, notes))
+        conn.commit()
+        rid = cursor.lastrowid
+        cursor.close()
+        conn.close()
+        return rid
+    except Exception as e:
+        print(f"记录情绪时间失败: {str(e)}")
+        return None
+
+def get_emotion_timeslot_distribution(start_time=None, end_time=None):
+    """获取情绪在固定时段的分布统计，用于柱状图
+    规则：
+      - 上午: 08:00-12:00
+      - 中午: 12:00-14:00
+      - 下午: 14:00-18:00
+      - 晚上: 18:00-22:00
+    若未提供时间范围，默认当天 08:00-22:00。
+    返回：{"timeSlots":[..], "emotions": {emotion: [counts...]}}
+    统计单位：以记录条数计数（简化）。
+    """
+    try:
+        now = datetime.now()
+        if start_time is None or end_time is None:
+            day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            start_time = day.replace(hour=8)
+            end_time = day.replace(hour=22)
+
+        slots = [
+            ("上午", 8, 12),
+            ("中午", 12, 14),
+            ("下午", 14, 18),
+            ("晚上", 18, 22),
+        ]
+
+        emotions = ['happy','neutral','sad','angry','surprised','fearful','disgusted','focused']
+        # 初始化计数
+        counts = {e: [0]*len(slots) for e in emotions}
+
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+
+        # 拉取时间范围内的记录
+        cursor.execute(
+            """
+            SELECT start_time, end_time, dominant_emotion
+            FROM emotion_time_records
+            WHERE start_time >= %s AND end_time <= %s
+            """,
+            (start_time, end_time),
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        # 计入对应时段：按照记录的 start_time 所属小时归类
+        for r in rows:
+            st = r.get('start_time')
+            emo = (r.get('dominant_emotion') or 'unknown').lower()
+            if not st:
+                continue
+            hour = st.hour
+            slot_index = -1
+            for idx, (_, h1, h2) in enumerate(slots):
+                if h1 <= hour < h2:
+                    slot_index = idx
+                    break
+            if slot_index >= 0 and emo in counts:
+                counts[emo][slot_index] += 1
+
+        return {"timeSlots": [s[0] for s in slots], "emotions": counts}
+    except Exception as e:
+        print(f"获取情绪时段分布失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {"timeSlots": ["上午","中午","下午","晚上"], "emotions": {}}
 
 def export_all_posture_records(time_range='all', start_date=None, end_date=None):
     """导出所有坐姿相关记录，包括图像记录和时间记录
