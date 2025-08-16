@@ -753,7 +753,8 @@ async def get_posture_images(
     返回: { data: [ ...images ], total, page, limit }
     """
     try:
-        static_dir = Path(__file__).resolve().parents[2] / 'static' / 'posture_images'
+        # 与 server.py 的 /static 挂载以及 modules.database_module 保持一致：项目根目录/static/posture_images
+        static_dir = Path(__file__).resolve().parents[3] / 'static' / 'posture_images'
         if not static_dir.exists():
             return {"data": [], "total": 0, "page": page, "limit": limit}
 
@@ -801,7 +802,7 @@ async def get_posture_images(
 async def get_posture_image_detail(image_id: str):
     """返回单张图像的详细信息（示例实现）"""
     try:
-        static_dir = Path(__file__).resolve().parents[2] / 'static' / 'posture_images'
+        static_dir = Path(__file__).resolve().parents[3] / 'static' / 'posture_images'
         candidates = list(static_dir.glob(f"{image_id}.*"))
         if not candidates:
             raise HTTPException(status_code=404, detail="未找到该图像")
@@ -825,11 +826,71 @@ async def get_posture_image_detail(image_id: str):
         logger.error(f"获取图像详情失败: {e}")
         raise HTTPException(status_code=500, detail="获取图像详情失败")
 
+@router.get("/monitor/posture/bad_timeslots")
+async def get_bad_timeslot_distribution(
+    timeRange: str = Query("day", pattern="^(day|week|month)$")
+):
+    """返回不良姿态的时段分布（以静态图片时间作为近似事件）。
+
+    当前实现基于 static/posture_images 目录下文件时间，按 2 小时段聚合：
+    8-10, 10-12, 12-14, 14-16, 16-18, 18-20。
+    若后续数据库提供 is_bad_posture 字段，可在此处过滤仅不良记录。
+    """
+    try:
+        # 计算时间范围
+        now = datetime.now(timezone.utc)
+        if timeRange == 'day':
+            start_dt = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+        elif timeRange == 'week':
+            start_dt = now - __import__('datetime').timedelta(days=7)
+        else:  # month
+            start_dt = now - __import__('datetime').timedelta(days=30)
+
+        # 2小时段，仅统计 8:00-20:00 共6段
+        slots = [(8,10),(10,12),(12,14),(14,16),(16,18),(18,20)]
+        labels = [f"{a}-{b}" for a,b in slots]
+        counts = [0]*len(slots)
+
+        static_dir = Path(__file__).resolve().parents[3] / 'static' / 'posture_images'
+        if not static_dir.exists():
+            return {"labels": labels, "counts": counts, "timeRange": timeRange}
+
+        def parse_time_from_name(name: str) -> Optional[datetime]:
+            try:
+                stem = Path(name).stem
+                parts = stem.split('_')
+                for i in range(len(parts) - 1):
+                    if len(parts[i]) == 8 and len(parts[i+1]) == 6 and parts[i].isdigit() and parts[i+1].isdigit():
+                        dt = datetime.strptime(parts[i] + parts[i+1], '%Y%m%d%H%M%S')
+                        return dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                return None
+            return None
+
+        for p in static_dir.iterdir():
+            if not (p.is_file() and p.suffix.lower() in {'.jpg', '.jpeg', '.png'}):
+                continue
+            dt = parse_time_from_name(p.name)
+            if dt is None:
+                dt = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+            if dt < start_dt:
+                continue
+            hour = dt.hour
+            for idx, (a,b) in enumerate(slots):
+                if a <= hour < b:
+                    counts[idx] += 1
+                    break
+
+        return {"labels": labels, "counts": counts, "timeRange": timeRange, "unit": "events"}
+    except Exception as e:
+        logger.error(f"获取不良时段分布失败: {e}")
+        raise HTTPException(status_code=500, detail="获取不良时段分布失败")
+
 @router.get("/monitor/posture/statistics")
 async def get_posture_statistics(time_range: str = Query('day')):
     """示例统计接口：根据静态目录文件数返回概要统计。"""
     try:
-        static_dir = Path(__file__).resolve().parents[2] / 'static' / 'posture_images'
+        static_dir = Path(__file__).resolve().parents[3] / 'static' / 'posture_images'
         total = len([p for p in static_dir.iterdir() if p.is_file()]) if static_dir.exists() else 0
         # 简单占位分布
         good = int(total * 0.6)

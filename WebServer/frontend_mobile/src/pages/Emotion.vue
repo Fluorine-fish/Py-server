@@ -238,103 +238,43 @@ const emotionData = reactive({
 const initCharts = async () => {
   await nextTick();
   
-  // 情绪趋势图
+  // 情绪趋势图（对接 /monitor/emotion/trends）
   if (trendChart.value && !charts.trend) {
     charts.trend = echarts.init(trendChart.value);
-    charts.trend.setOption({
-      title: {
-        text: '全天情绪波动趋势',
-        subtext: '情绪值(-3到3分)',
-        left: 'center',
-        top: 0,
-        textStyle: { color: '#333', fontSize: 14, fontWeight: 'normal' },
-        subtextStyle: { color: '#666', fontSize: 12 }
-      },
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: { type: 'shadow' }
-      },
-      grid: {
-        left: '3%', right: '4%', bottom: '3%', containLabel: true
-      },
-      xAxis: {
-        type: 'category',
-        boundaryGap: false,
-        data: ['8:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00'],
-        axisLine: { lineStyle: { color: '#ddd' } },
-        axisLabel: { color: '#666' }
-      },
-      yAxis: {
-        type: 'value',
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: { color: '#666' },
-        splitLine: { lineStyle: { color: 'rgba(0, 0, 0, 0.05)' } }
-      },
-      series: [{
-        name: '情绪值',
-        type: 'line',
-        smooth: true,
-        data: [1, 0, 2, 1, -2, 0, 1],
-        areaStyle: {
-          color: {
-            type: 'linear',
-            x: 0, y: 0, x2: 0, y2: 1,
-            colorStops: [
-              { offset: 0, color: 'rgba(58, 132, 105, 0.5)' },
-              { offset: 1, color: 'rgba(58, 132, 105, 0.1)' }
-            ]
-          }
-        },
-        lineStyle: { width: 3, color: '#3A8469' },
-        itemStyle: { color: '#3A8469' },
-        symbolSize: 8
-      }]
-    });
+    try {
+      const trend = await monitorApi.getEmotionTrends();
+      const labels = trend?.labels || ['06:00','08:00','10:00','12:00','14:00','16:00','18:00','20:00'];
+      const seriesData = trend?.data || [0.7,0.8,0.75,0.9,0.85,0.8,0.82,0.78];
+      charts.trend.setOption({
+        title: { text: '全天情绪波动趋势', subtext: '情绪值(0-1)', left: 'center', top: 0 },
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+        xAxis: { type: 'category', boundaryGap: false, data: labels, axisLine: { lineStyle: { color: '#ddd' } }, axisLabel: { color: '#666' } },
+        yAxis: { type: 'value', axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: '#666' }, splitLine: { lineStyle: { color: 'rgba(0,0,0,0.05)' } } },
+        series: [{ name: '情绪值', type: 'line', smooth: true, data: seriesData, areaStyle: { color: 'rgba(58,132,105,0.25)' }, lineStyle: { width: 3, color: '#3A8469' }, itemStyle: { color: '#3A8469' } }]
+      });
+    } catch(e) {
+      charts.trend.setOption({ xAxis: { data: ['06:00','08:00','10:00','12:00','14:00','16:00','18:00','20:00'] }, series: [{ type: 'line', data: [0.7,0.8,0.75,0.9,0.85,0.8,0.82,0.78] }] });
+    }
   }
 
-  // 情绪雷达图
+  // 情绪雷达图（对接 /monitor/emotion/radar）
   if (radarChart.value && !charts.radar) {
     charts.radar = echarts.init(radarChart.value);
-    charts.radar.setOption({
-      title: {
-        text: '今日情绪多维分析',
-        subtext: '各项情绪指标评分(1-5分)',
-        left: 'center',
-        top: 0,
-        textStyle: { color: '#333', fontSize: 14, fontWeight: 'normal' },
-        subtextStyle: { color: '#666', fontSize: 12 }
-      },
-      tooltip: { trigger: 'item' },
-      legend: { data: ['今日情绪'], bottom: 0 },
-      radar: {
-        indicator: [
-          { name: '高兴', max: 5 },
-          { name: '悲伤', max: 5 },
-          { name: '愤怒', max: 5 },
-          { name: '惊讶', max: 5 },
-          { name: '平静', max: 5 }
-        ],
-        radius: '65%',
-        splitNumber: 4,
-        axisName: { color: '#666' },
-        splitLine: { lineStyle: { color: 'rgba(0, 0, 0, 0.1)' } },
-        splitArea: { show: false },
-        axisLine: { lineStyle: { color: 'rgba(0, 0, 0, 0.1)' } }
-      },
-      series: [{
-        name: '情绪雷达图',
-        type: 'radar',
-        data: [{
-          value: [4, 2, 1, 3, 4],
-          name: '今日情绪',
-          areaStyle: { color: 'rgba(58, 132, 105, 0.4)' },
-          lineStyle: { width: 2, color: '#3A8469' },
-          symbolSize: 6,
-          itemStyle: { color: '#3A8469' }
-        }]
-      }]
-    });
+    try {
+      const radar = await monitorApi.getEmotionRadar();
+      const labels = radar?.labels || ['专注度','愉悦度','放松度','疲劳度','压力值'];
+      const current = radar?.current || [85,75,60,30,25];
+      charts.radar.setOption({
+        title: { text: '今日情绪多维分析', left: 'center', top: 0 },
+        tooltip: { trigger: 'item' },
+        legend: { data: ['今日情绪'], bottom: 0 },
+        radar: { indicator: labels.map(n => ({ name: n, max: 100 })), radius: '65%' },
+        series: [{ type: 'radar', data: [{ value: current, name: '今日情绪', areaStyle: { color: 'rgba(58,132,105,0.4)' }, lineStyle: { width: 2, color: '#3A8469' } }] }]
+      });
+    } catch(e) {
+      charts.radar.setOption({ radar: { indicator: [ { name: '专注度', max: 100 }, { name: '愉悦度', max: 100 }, { name: '放松度', max: 100 }, { name: '疲劳度', max: 100 }, { name: '压力值', max: 100 } ] }, series: [{ type: 'radar', data: [{ value: [85,75,60,30,25] }] }] });
+    }
   }
 
   // 情绪分布柱状图
@@ -370,62 +310,32 @@ const initCharts = async () => {
     await refreshEmotionDistribution();
   }
 
-  // 情绪热力图
+  // 情绪热力图（对接 /monitor/emotion/heatmap）
   if (heatmapChart.value && !charts.heatmap) {
     charts.heatmap = echarts.init(heatmapChart.value);
-    
-    // 生成热力图数据
-    const heatmapData = [
-      [0, 0, 2], [1, 0, 1], [2, 0, -1], [3, 0, 2], [4, 0, 1], [5, 0, 0], [6, 0, 1],
-      [0, 1, 1], [1, 1, 2], [2, 1, 0], [3, 1, 1], [4, 1, 2], [5, 1, 1], [6, 1, 0],
-      [0, 2, 0], [1, 2, 1], [2, 2, -2], [3, 2, -1], [4, 2, 0], [5, 2, 1], [6, 2, 2],
-      [0, 3, -1], [1, 3, 0], [2, 3, 1], [3, 3, 0], [4, 3, -1], [5, 3, 2], [6, 3, 1],
-      [0, 4, 0], [1, 4, 1], [2, 4, 0], [3, 4, -1], [4, 4, 0], [5, 4, 1], [6, 4, 0]
-    ];
-    
-    charts.heatmap.setOption({
-      title: {
-        text: '周情绪热力图',
-        subtext: '情绪值(-2到2分)',
-        left: 'center',
-        top: 0,
-        textStyle: { color: '#333', fontSize: 14, fontWeight: 'normal' },
-        subtextStyle: { color: '#666', fontSize: 12 }
-      },
-      tooltip: {
-        position: 'top',
-        formatter: function (params) {
-          const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-          const times = ['早晨', '上午', '中午', '下午', '晚上'];
-          return `${days[params.data[0]]} ${times[params.data[1]]}<br>情绪值: ${params.data[2]}`;
+    try {
+      const hm = await monitorApi.getEmotionHeatmap();
+      const days = hm?.days || ['周一','周二','周三','周四','周五','周六','周日'];
+      const hours = hm?.hours || ['6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22'];
+      const matrix = Array.isArray(hm?.data) ? hm.data : [];
+      const data = [];
+      for (let r=0;r<matrix.length;r++){
+        for (let c=0;c<(matrix[r]||[]).length;c++){
+          data.push([r,c,matrix[r][c]]);
         }
-      },
-      grid: { top: '15%', left: '3%', right: '4%', bottom: '15%', containLabel: true },
-      xAxis: {
-        type: 'category',
-        data: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
-        splitArea: { show: true },
-        axisLine: { lineStyle: { color: '#ddd' } },
-        axisLabel: { color: '#666' }
-      },
-      yAxis: {
-        type: 'category',
-        data: ['早晨', '上午', '中午', '下午', '晚上'],
-        splitArea: { show: true },
-        axisLine: { lineStyle: { color: '#ddd' } },
-        axisLabel: { color: '#666' }
-      },
-      visualMap: {
-        min: -2, max: 2, calculable: true, orient: 'horizontal',
-        left: 'center', bottom: '0%',
-        inRange: { color: ['#F44336', '#FF9800', '#f8f9fa', '#74c69d', '#3A8469'] }
-      },
-      series: [{
-        name: '情绪值', type: 'heatmap', data: heatmapData,
-        label: { show: false },
-        emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
-      }]
-    });
+      }
+      charts.heatmap.setOption({
+        title: { text: '周情绪热力图', left: 'center', top: 0 },
+        tooltip: { position: 'top', formatter: (p)=> `${days[p.data[0]]} ${hours[p.data[1]]}<br>情绪值: ${p.data[2]}` },
+        grid: { top: '15%', left: '3%', right: '4%', bottom: '15%', containLabel: true },
+        xAxis: { type: 'category', data: days, splitArea: { show: true } },
+        yAxis: { type: 'category', data: hours, splitArea: { show: true } },
+        visualMap: { min: 0, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%' },
+        series: [{ name: '情绪值', type: 'heatmap', data, label: { show: false } }]
+      });
+    } catch(e) {
+      charts.heatmap.setOption({ series: [{ type: 'heatmap', data: [] }] });
+    }
   }
 };
 

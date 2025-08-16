@@ -205,6 +205,7 @@
 import { ref, reactive, onMounted, nextTick, watch } from 'vue';
 import Chart from 'chart.js/auto';
 import * as echarts from 'echarts';
+import { monitorApi } from '../api';
 
 // 活动标签页
 const activeTab = ref('trends');
@@ -228,47 +229,37 @@ const eyeData = reactive({
 const initCharts = async () => {
   await nextTick();
   
-  // 护眼趋势图 - Chart.js 折线图
+  // 护眼趋势图 - Chart.js 折线图（对接后端 /monitor/eye/trends）
   if (trendsChart.value) {
     const ctx = trendsChart.value.getContext('2d');
     charts.trends = new Chart(ctx, {
       type: 'line',
-      data: {
-        labels: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
-        datasets: [
-          {
-            label: '用眼时长 (小时)',
-            data: [6.5, 7.2, 5.8, 8.1, 6.9, 4.3, 3.8],
-            borderColor: '#3b82f6',
-            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-            fill: true,
-            tension: 0.4
-          },
-          {
-            label: '休息次数',
-            data: [8, 6, 9, 5, 7, 12, 15],
-            borderColor: '#10b981',
-            backgroundColor: 'rgba(16, 185, 129, 0.1)',
-            fill: true,
-            tension: 0.4
-          }
-        ]
-      },
+      data: { labels: [], datasets: [] },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'bottom'
-          }
-        },
-        scales: {
-          y: {
-            beginAtZero: true
-          }
-        }
+        plugins: { legend: { position: 'bottom' } },
+        scales: { y: { beginAtZero: true } }
       }
     });
+    try {
+      const trend = await monitorApi.getEyeTrends();
+      const labels = trend?.labels || ['00:00','04:00','08:00','12:00','16:00','20:00'];
+      const ds = trend?.datasets || [
+        { label: '眨眼频率', data: [15,18,22,19,16,20], borderColor: '#3b82f6' },
+        { label: '用眼距离', data: [45,42,38,41,44,46], borderColor: '#10b981' }
+      ];
+      charts.trends.data.labels = labels;
+      charts.trends.data.datasets = ds.map(d => ({
+        ...d,
+        backgroundColor: (d.borderColor || '#3b82f6') + '22',
+        fill: true,
+        tension: 0.35
+      }));
+      charts.trends.update('active');
+    } catch(e) {
+      // fallback 保留空图或默认数据
+    }
   }
 };
 
@@ -276,68 +267,46 @@ const initCharts = async () => {
 const initEChartsLazy = async () => {
   await nextTick();
   
-  // 光照环境雷达图 - ECharts
+  // 光照环境雷达图 - ECharts（对接 /monitor/eye/environment）
   if (radarChart.value && !charts.radar) {
     charts.radar = echarts.init(radarChart.value);
-    charts.radar.setOption({
-      radar: {
-        indicator: [
-          { name: '亮度', max: 100 },
-          { name: '对比度', max: 100 },
-          { name: '色温', max: 100 },
-          { name: '蓝光', max: 100 },
-          { name: '闪烁', max: 100 }
-        ],
-        radius: '60%'
-      },
-      series: [{
-        type: 'radar',
-        data: [
-          {
-            value: [85, 70, 90, 30, 20],
-            name: '当前环境',
-            areaStyle: {
-              color: 'rgba(59, 130, 246, 0.3)'
-            },
-            lineStyle: {
-              color: '#3b82f6'
-            }
-          },
-          {
-            value: [80, 80, 85, 25, 15],
-            name: '推荐值',
-            areaStyle: {
-              color: 'rgba(16, 185, 129, 0.2)'
-            },
-            lineStyle: {
-              color: '#10b981'
-            }
-          }
-        ]
-      }]
-    });
+    try {
+      const env = await monitorApi.getEyeEnvironment();
+      const indicators = (env?.labels || ['环境光','屏幕亮度','对比度','色温','反射','眩光']).map(n => ({ name: n, max: 100 }));
+      const current = env?.data || [80,75,85,90,70,65];
+      const optimal = env?.optimal || [85,80,80,85,75,70];
+      charts.radar.setOption({
+        radar: { indicator: indicators, radius: '60%' },
+        legend: { bottom: 0 },
+        series: [{
+          type: 'radar',
+          data: [
+            { value: current, name: '当前环境', areaStyle: { color: 'rgba(59,130,246,0.3)' }, lineStyle: { color: '#3b82f6' } },
+            { value: optimal, name: '推荐值', areaStyle: { color: 'rgba(16,185,129,0.2)' }, lineStyle: { color: '#10b981' } }
+          ]
+        }]
+      });
+    } catch(e) {
+      charts.radar.setOption({ radar: { indicator: [ { name: '亮度', max: 100 }, { name: '对比度', max: 100 }, { name: '色温', max: 100 }, { name: '蓝光', max: 100 }, { name: '闪烁', max: 100 } ] } });
+    }
   }
 
-  // 用眼时间热力图 - ECharts
+  // 用眼时间热力图 - ECharts（对接 /monitor/eye/heatmap）
   if (heatmapChart.value && !charts.heatmap) {
     charts.heatmap = echarts.init(heatmapChart.value);
-    
-    // 生成热力图数据
-    const hours = [];
-    const days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-    for (let i = 0; i < 24; i++) {
-      hours.push(i + ':00');
-    }
-    
-    const data = [];
-    for (let d = 0; d < 7; d++) {
-      for (let h = 0; h < 24; h++) {
-        const intensity = Math.random() * 10;
-        data.push([h, d, Math.round(intensity)]);
+    try {
+      const hm = await monitorApi.getEyeHeatmap();
+      const hours = hm?.hours || ['6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22'];
+      const days = hm?.days || ['周一','周二','周三','周四','周五','周六','周日'];
+      // 将二维矩阵 data 转换为 [x,y,val] 三元组
+      const matrix = Array.isArray(hm?.data) ? hm.data : [];
+      const data = [];
+      for (let r = 0; r < matrix.length; r++) {
+        for (let c = 0; c < (matrix[r] || []).length; c++) {
+          data.push([c, r, matrix[r][c]]);
+        }
       }
-    }
-    
-    charts.heatmap.setOption({
+      charts.heatmap.setOption({
       tooltip: {
         position: 'top',
         formatter: function (params) {
@@ -379,7 +348,7 @@ const initEChartsLazy = async () => {
       series: [{
         name: '用眼强度',
         type: 'heatmap',
-        data: data,
+          data,
         label: {
           show: false
         },
@@ -390,10 +359,14 @@ const initEChartsLazy = async () => {
           }
         }
       }]
-    });
+      });
+    } catch(e) {
+      // 保留默认空热力图
+      charts.heatmap.setOption({ series: [{ type: 'heatmap', data: [] }] });
+    }
   }
 
-  // 眼睛距离仪表盘 - ECharts
+  // 眼睛距离仪表盘 - ECharts（保留静态外观，数值来自 /monitor/eye 和 /monitor/eye/data）
   if (gaugeChart.value && !charts.gauge) {
     charts.gauge = echarts.init(gaugeChart.value);
     charts.gauge.setOption({
@@ -469,15 +442,24 @@ const initEChartsLazy = async () => {
             },
             color: 'auto'
           },
-          data: [
-            {
-              value: 70,
-              name: '距离监测'
-            }
-          ]
+          data: [ { value: 70, name: '距离监测' } ]
         }
       ]
     });
+    // 拉取实时用眼数据，填充小卡与仪表盘读数
+    try {
+      const detail = await monitorApi.getEyeDetailData();
+      if (detail) {
+        eyeData.blink_rate = String(detail.blink_rate || '-');
+        eyeData.distance = String(detail.distance || '-');
+        eyeData.focus_time = String(detail.focus_time || '-');
+      }
+    } catch(e) { /* 保底显示 */ }
+    try {
+      const realtime = await monitorApi.getEyeData();
+      const dist = Number(realtime?.eyeDistance ?? 50);
+      charts.gauge.setOption({ series: [{ detail: { formatter: (v)=> Math.round(v*0.8+20) + ' cm' }, data: [{ value: Math.max(0, Math.min(100, dist)), name: '距离监测' }] }] });
+    } catch(e) { /* ignore */ }
   }
 };
 
@@ -536,19 +518,7 @@ watch(activeTab, async (newTab) => {
 
 // 加载数据
 onMounted(async () => {
-  // 获取用眼数据
-  fetch('/api/data/eye').then(r => r.json()).then(data => {
-    Object.assign(eyeData, data);
-  }).catch(() => {
-    // 使用模拟数据
-    Object.assign(eyeData, {
-      blink_rate: '18',
-      distance: '45',
-      focus_time: '25'
-    });
-  });
-
-  // 初始化 Chart.js 图表（护眼趋势图，默认可见）
+  // 初始化 Chart.js 图表（护眼趋势图，默认可见）并对接真实接口
   await initCharts();
   
   // 监听窗口大小变化

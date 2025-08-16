@@ -129,7 +129,8 @@ export default {
     // 使用nextTick确保DOM已经渲染完成
     this.$nextTick(() => {
       this.initEmotionCharts();
-      
+      // 对接真实接口
+      this.loadEmotionRealData();
       // 设置定时器，确保图表正确渲染并添加动画效果
       setTimeout(() => {
         this.resizeCharts();
@@ -145,34 +146,88 @@ export default {
     window.removeEventListener('resize', this.resizeCharts);
   },
   methods: {
-    // 模拟获取情绪数据的API
-    fetchEmotionData() {
-      // 这里模拟从API获取数据
-      return {
-        dailyTrend: {
-          times: ['8:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00'],
-          emotions: {
-            happy: [80, 65, 70, 50, 60, 75, 85],
-            calm: [50, 60, 55, 65, 50, 60, 50],
-            anxious: [20, 25, 30, 45, 60, 40, 25],
-            sad: [10, 15, 20, 60, 40, 20, 15],
-            angry: [5, 10, 15, 20, 10, 5, 5]
-          }
-        },
-        distribution: [
-          { value: 45, name: '开心' },
-          { value: 30, name: '平静' },
-          { value: 15, name: '焦虑' },
-          { value: 7, name: '沮丧' },
-          { value: 3, name: '生气' }
-        ],
-        factors: [80, 65, 40, 60, 30]
-      };
+    // 真实数据装载
+    async loadEmotionRealData() {
+      try {
+        // 1) 趋势与主导情绪
+        const trendRes = await fetch('/api/monitor/emotion/trends');
+        const trendJson = trendRes.ok ? await trendRes.json() : null;
+        const labels = trendJson?.labels || [];
+        const values = trendJson?.data || [];
+        const dominant = trendJson?.emotions || [];
+
+        // 2) 雷达数据
+        const radarRes = await fetch('/api/monitor/emotion/radar');
+        const radarJson = radarRes.ok ? await radarRes.json() : null;
+
+        // 更新每日情绪趋势为“情绪指数”单线
+        if (this.charts.dailyEmotion) {
+          this.charts.dailyEmotion.setOption({
+            legend: { data: ['情绪指数'] },
+            xAxis: { data: labels },
+            series: [
+              {
+                name: '情绪指数',
+                type: 'line',
+                data: values.map(v => Math.round(Number(v) * 100)),
+                smooth: true,
+                symbol: 'circle',
+                symbolSize: 8,
+                lineStyle: { width: 3, color: '#34a853' },
+                itemStyle: { color: '#34a853', borderWidth: 2, borderColor: '#fff' },
+                areaStyle: {
+                  color: {
+                    type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                    colorStops: [{ offset: 0, color: 'rgba(52,168,83,0.3)' }, { offset: 1, color: 'rgba(52,168,83,0.05)' }]
+                  }
+                }
+              }
+            ]
+          });
+        }
+
+        // 基于主导情绪数组统计分布，更新饼图
+        const nameMap = { neutral: '平静', happy: '开心', focused: '专注', sad: '沮丧', angry: '生气', anxious: '焦虑' };
+        const counter = {};
+        dominant.forEach(k => {
+          const cn = nameMap[k] || k;
+          counter[cn] = (counter[cn] || 0) + 1;
+        });
+        const pieData = Object.keys(counter).map(name => ({ name, value: counter[name] }));
+        if (this.charts.emotionDistribution && pieData.length) {
+          this.charts.emotionDistribution.setOption({
+            legend: { data: pieData.map(i => i.name) },
+            series: [{ data: pieData }]
+          });
+        }
+
+        // 雷达图：current/average/optimal
+        if (this.charts.emotionFactors && radarJson) {
+          const indicators = (radarJson.labels || []).map(n => ({ name: n, max: 100 }));
+          this.charts.emotionFactors.setOption({
+            radar: { indicator: indicators },
+            series: [{
+              data: [
+                {
+                  value: (radarJson.current || []).map(Number),
+                  name: '当前',
+                }
+              ]
+            }]
+          });
+        }
+      } catch (e) {
+        console.warn('加载情绪真实数据失败，使用占位:', e);
+      }
     },
     
     initEmotionCharts() {
-      // 获取模拟数据
-      const emotionData = this.fetchEmotionData();
+      // 基础占位数据，待 loadEmotionRealData 覆盖
+      const emotionData = {
+        dailyTrend: { times: ['8:00','10:00','12:00','14:00','16:00','18:00','20:00'], emotions: { happy:[70,72,74,76,78,80,82] } },
+        distribution: [ { value: 45, name: '开心' }, { value: 30, name: '平静' }, { value: 15, name: '焦虑' }, { value: 7, name: '沮丧' }, { value: 3, name: '生气' } ],
+        factors: [80,65,40,60,30]
+      };
       
       // 每日情绪趋势图
       const dailyEmotionChart = echarts.init(document.getElementById('dailyEmotionChart'));
@@ -199,7 +254,7 @@ export default {
           }
         },
         legend: {
-          data: ['开心', '平静', '焦虑', '沮丧', '生气'],
+          data: ['情绪指数'],
           bottom: 0,
           icon: 'circle',
           itemWidth: 10,
@@ -245,7 +300,7 @@ export default {
         },
         series: [
           {
-            name: '开心',
+            name: '情绪指数',
             type: 'line',
             data: emotionData.dailyTrend.emotions.happy,
             smooth: true,
@@ -269,13 +324,7 @@ export default {
                 y: 0,
                 x2: 0,
                 y2: 1,
-                colorStops: [{
-                  offset: 0,
-                  color: 'rgba(52, 168, 83, 0.3)'
-                }, {
-                  offset: 1,
-                  color: 'rgba(52, 168, 83, 0.05)'
-                }]
+                colorStops: [{ offset: 0, color: 'rgba(52, 168, 83, 0.3)' }, { offset: 1, color: 'rgba(52, 168, 83, 0.05)' }]
               }
             },
             emphasis: {
@@ -283,178 +332,6 @@ export default {
                 borderWidth: 3,
                 borderColor: '#fff',
                 shadowColor: 'rgba(52, 168, 83, 0.5)',
-                shadowBlur: 10
-              }
-            }
-          },
-          {
-            name: '平静',
-            type: 'line',
-            data: emotionData.dailyTrend.emotions.calm,
-            smooth: true,
-            symbol: 'circle',
-            symbolSize: 8,
-            lineStyle: {
-              width: 3,
-              color: '#4285f4',
-              shadowColor: 'rgba(66, 133, 244, 0.3)',
-              shadowBlur: 10
-            },
-            itemStyle: {
-              color: '#4285f4',
-              borderWidth: 2,
-              borderColor: '#fff'
-            },
-            areaStyle: {
-              color: {
-                type: 'linear',
-                x: 0,
-                y: 0,
-                x2: 0,
-                y2: 1,
-                colorStops: [{
-                  offset: 0,
-                  color: 'rgba(66, 133, 244, 0.3)'
-                }, {
-                  offset: 1,
-                  color: 'rgba(66, 133, 244, 0.05)'
-                }]
-              }
-            },
-            emphasis: {
-              itemStyle: {
-                borderWidth: 3,
-                borderColor: '#fff',
-                shadowColor: 'rgba(66, 133, 244, 0.5)',
-                shadowBlur: 10
-              }
-            }
-          },
-          {
-            name: '焦虑',
-            type: 'line',
-            data: emotionData.dailyTrend.emotions.anxious,
-            smooth: true,
-            symbol: 'circle',
-            symbolSize: 8,
-            lineStyle: {
-              width: 3,
-              color: '#fbbc05',
-              shadowColor: 'rgba(251, 188, 5, 0.3)',
-              shadowBlur: 10
-            },
-            itemStyle: {
-              color: '#fbbc05',
-              borderWidth: 2,
-              borderColor: '#fff'
-            },
-            areaStyle: {
-              color: {
-                type: 'linear',
-                x: 0,
-                y: 0,
-                x2: 0,
-                y2: 1,
-                colorStops: [{
-                  offset: 0,
-                  color: 'rgba(251, 188, 5, 0.3)'
-                }, {
-                  offset: 1,
-                  color: 'rgba(251, 188, 5, 0.05)'
-                }]
-              }
-            },
-            emphasis: {
-              itemStyle: {
-                borderWidth: 3,
-                borderColor: '#fff',
-                shadowColor: 'rgba(251, 188, 5, 0.5)',
-                shadowBlur: 10
-              }
-            }
-          },
-          {
-            name: '沮丧',
-            type: 'line',
-            data: emotionData.dailyTrend.emotions.sad,
-            smooth: true,
-            symbol: 'circle',
-            symbolSize: 8,
-            lineStyle: {
-              width: 3,
-              color: '#9c27b0',
-              shadowColor: 'rgba(156, 39, 176, 0.3)',
-              shadowBlur: 10
-            },
-            itemStyle: {
-              color: '#9c27b0',
-              borderWidth: 2,
-              borderColor: '#fff'
-            },
-            areaStyle: {
-              color: {
-                type: 'linear',
-                x: 0,
-                y: 0,
-                x2: 0,
-                y2: 1,
-                colorStops: [{
-                  offset: 0,
-                  color: 'rgba(156, 39, 176, 0.3)'
-                }, {
-                  offset: 1,
-                  color: 'rgba(156, 39, 176, 0.05)'
-                }]
-              }
-            },
-            emphasis: {
-              itemStyle: {
-                borderWidth: 3,
-                borderColor: '#fff',
-                shadowColor: 'rgba(156, 39, 176, 0.5)',
-                shadowBlur: 10
-              }
-            }
-          },
-          {
-            name: '生气',
-            type: 'line',
-            data: emotionData.dailyTrend.emotions.angry,
-            smooth: true,
-            symbol: 'circle',
-            symbolSize: 8,
-            lineStyle: {
-              width: 3,
-              color: '#ea4335',
-              shadowColor: 'rgba(234, 67, 53, 0.3)',
-              shadowBlur: 10
-            },
-            itemStyle: {
-              color: '#ea4335',
-              borderWidth: 2,
-              borderColor: '#fff'
-            },
-            areaStyle: {
-              color: {
-                type: 'linear',
-                x: 0,
-                y: 0,
-                x2: 0,
-                y2: 1,
-                colorStops: [{
-                  offset: 0,
-                  color: 'rgba(234, 67, 53, 0.3)'
-                }, {
-                  offset: 1,
-                  color: 'rgba(234, 67, 53, 0.05)'
-                }]
-              }
-            },
-            emphasis: {
-              itemStyle: {
-                borderWidth: 3,
-                borderColor: '#fff',
-                shadowColor: 'rgba(234, 67, 53, 0.5)',
                 shadowBlur: 10
               }
             }
@@ -476,19 +353,17 @@ export default {
       };
       
       // 处理数据，添加颜色
-      const pieData = emotionData.distribution.map(item => {
-        return {
-          ...item,
-          itemStyle: {
-            color: emotionColors[item.name],
-            borderRadius: 10,
-            borderColor: '#fff',
-            borderWidth: 2,
-            shadowBlur: 10,
-            shadowColor: 'rgba(0, 0, 0, 0.1)'
-          }
-        };
-      });
+      const pieData = emotionData.distribution.map(item => ({
+        ...item,
+        itemStyle: {
+          color: emotionColors[item.name] || '#888',
+          borderRadius: 10,
+          borderColor: '#fff',
+          borderWidth: 2,
+          shadowBlur: 10,
+          shadowColor: 'rgba(0, 0, 0, 0.1)'
+        }
+      }));
       
       emotionDistributionChart.setOption({
         tooltip: {

@@ -86,6 +86,22 @@ export const monitorApi = {
   getEyeData() {
     return api.get('/monitor/eye');
   },
+  // 获取用眼趋势（Chart.js 友好结构）
+  getEyeTrends(params) {
+    return api.get('/monitor/eye/trends', { params });
+  },
+  // 获取用眼环境指标（雷达图）
+  getEyeEnvironment(params) {
+    return api.get('/monitor/eye/environment', { params });
+  },
+  // 获取用眼热力图
+  getEyeHeatmap(params) {
+    return api.get('/monitor/eye/heatmap', { params });
+  },
+  // 获取用眼详情数据（仪表盘/统计小卡）
+  getEyeDetailData(params) {
+    return api.get('/monitor/eye/data', { params });
+  },
   
   // 获取用眼历史记录
   getEyeHistory(params) {

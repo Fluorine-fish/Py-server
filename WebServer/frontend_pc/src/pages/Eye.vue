@@ -120,7 +120,9 @@ export default {
     }
   },
   mounted() {
-    this.initCharts();
+  this.initCharts();
+  // 接入真实数据：加载用眼趋势并更新图表
+  this.loadEyeTrends();
   },
   methods: {
     initCharts() {
@@ -234,6 +236,48 @@ export default {
           }
         }
       });
+    },
+
+    // 从后端获取真实趋势数据并更新图表
+    async loadEyeTrends() {
+      try {
+        const res = await fetch('/api/monitor/eye/trends');
+        if (!res.ok) throw new Error('接口返回非 200');
+        const json = await res.json();
+        const { labels = [], datasets = [] } = json || {};
+
+        // 更新眨眼频率折线图
+        const blinkDataset = datasets.find(d => d.label === '眨眼频率') || datasets[0] || { data: [] };
+        if (this.charts.blinkRate) {
+          this.charts.blinkRate.data.labels = labels;
+          this.charts.blinkRate.data.datasets[0].data = blinkDataset.data || [];
+          this.charts.blinkRate.update();
+        }
+
+        // 由“用眼距离”趋势数据进行分布统计（单位：厘米）
+        const distanceDataset = datasets.find(d => d.label && d.label.includes('用眼距离')) || datasets[1];
+        const values = Array.isArray(distanceDataset?.data) ? distanceDataset.data : [];
+        const bins = ['<20cm', '20-30cm', '30-40cm', '40-50cm', '>50cm'];
+        const counts = [0, 0, 0, 0, 0];
+        values.forEach(v => {
+          const val = Number(v);
+          if (isNaN(val)) return;
+          if (val < 20) counts[0]++;
+          else if (val < 30) counts[1]++;
+          else if (val < 40) counts[2]++;
+          else if (val < 50) counts[3]++;
+          else counts[4]++;
+        });
+        const total = counts.reduce((a, b) => a + b, 0) || 1;
+        const percents = counts.map(c => Math.round((c / total) * 100));
+        if (this.charts.eyeDistance) {
+          this.charts.eyeDistance.data.labels = bins;
+          this.charts.eyeDistance.data.datasets[0].data = percents;
+          this.charts.eyeDistance.update();
+        }
+      } catch (err) {
+        console.warn('加载用眼趋势失败，使用占位数据:', err);
+      }
     },
     
     generateEyeReport() {

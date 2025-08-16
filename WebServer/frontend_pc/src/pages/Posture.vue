@@ -36,6 +36,25 @@
         <div class="chart-container">
           <canvas id="posturePieChart"></canvas>
         </div>
+        <!-- 自定义图例：确保始终显示 -->
+        <div class="legend-grid">
+          <div class="legend-item">
+            <span class="legend-dot good"></span>
+            <span class="legend-text">{{ pieLegend.labels[0] }} {{ pieLegend.percents[0] }}%</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot mild"></span>
+            <span class="legend-text">{{ pieLegend.labels[1] }} {{ pieLegend.percents[1] }}%</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot moderate"></span>
+            <span class="legend-text">{{ pieLegend.labels[2] }} {{ pieLegend.percents[2] }}%</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot severe"></span>
+            <span class="legend-text">{{ pieLegend.labels[3] }} {{ pieLegend.percents[3] }}%</span>
+          </div>
+        </div>
         <div class="stats-grid">
           <div class="stat-item">
             <div class="stat-value">{{ stats.goodPostureHours }}</div>
@@ -155,6 +174,10 @@ export default {
         badPostureHours: '1.8h',
         goodRate: '64%'
       },
+      pieLegend: {
+        labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'],
+        percents: [100, 0, 0, 0]
+      },
   postureImages: [],
       charts: {
         posturePie: null,
@@ -171,6 +194,8 @@ export default {
         this.initCharts();
         this.loadPostureData();
   this.loadLatestImages();
+  // 初次渲染后主动刷新图表两次，避免初始布局尺寸导致的绘制异常
+  this.refreshChartsNTimes(2, 180);
       }, 300);
     });
     
@@ -181,14 +206,39 @@ export default {
     
     // 监听窗口大小变化，调整图表大小
     window.addEventListener('resize', this.resizeCharts);
+    // 页面可见性改变时，返回可见主动刷新一次
+    this._onVisibilityChange = () => { if (!document.hidden) this.refreshChartsNTimes(2, 150); };
+    document.addEventListener('visibilitychange', this._onVisibilityChange);
   },
   beforeUnmount() {
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
     }
     window.removeEventListener('resize', this.resizeCharts);
+    document.removeEventListener('visibilitychange', this._onVisibilityChange);
   },
   methods: {
+    // 刷新所有图表一次
+    refreshChartsOnce() {
+      try {
+        this.resizeCharts();
+        for (const key in this.charts) {
+          if (this.charts[key] && typeof this.charts[key].update === 'function') {
+            this.charts[key].update('none');
+          }
+        }
+      } catch (e) { console.warn('refreshChartsOnce warn:', e); }
+    },
+    // 在短时间内刷新N次，提高初次可见时的稳定性
+    refreshChartsNTimes(n = 2, delay = 150) {
+      let i = 0;
+      const tick = () => {
+        this.refreshChartsOnce();
+        i += 1;
+        if (i < n) setTimeout(tick, delay);
+      };
+      setTimeout(tick, 0);
+    },
     async loadLatestImages(){
       try{
         const res = await fetch('/api/monitor/posture/images?page=1&limit=4');
@@ -209,14 +259,16 @@ export default {
     initCharts() {
       try {
         // 初始化坐姿饼图
-        const pieCtx = document.getElementById('posturePieChart').getContext('2d');
-        this.charts.posturePie = new Chart(pieCtx, {
+        const el = document.getElementById('posturePieChart');
+        if (el) {
+          const pieCtx = el.getContext('2d');
+          this.charts.posturePie = new Chart(pieCtx, {
           type: 'doughnut',
           data: {
             labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'],
             datasets: [{
-              // 初始置零，加载后端数据后再更新
-              data: [0, 0, 0, 0],
+              // 初始给出可见占位，避免后端数据未到时图表完全空白
+              data: [100, 0, 0, 0],
               backgroundColor: [
                 '#34a853',
                 '#fbbc05',
@@ -232,6 +284,7 @@ export default {
             cutout: '70%',
             plugins: {
               legend: {
+                display: true,
                 position: 'bottom',
                 labels: {
                   padding: 20,
@@ -249,8 +302,41 @@ export default {
             }
           }
         });
-      // 初始化后立即拉取一次后端数据以填充饼图与统计
-      this.loadPostureDistribution();
+        // 初始化后立即拉取一次后端数据以填充饼图与统计
+        this.loadPostureDistribution();
+        } else {
+          // 若元素尚未挂载，只延迟初始化饼图本身，不影响其它图表初始化
+          setTimeout(() => {
+            const n = document.getElementById('posturePieChart');
+            if (n && !this.charts.posturePie) {
+              const ctx = n.getContext('2d');
+              this.charts.posturePie = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                  labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'],
+                  datasets: [{
+                    data: [100, 0, 0, 0],
+                    backgroundColor: ['#34a853','#fbbc05','#ff9800','#ea4335'],
+                    borderWidth: 0
+                  }]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  cutout: '70%',
+                  plugins: {
+                    legend: {
+                      display: true,
+                      position: 'bottom',
+                      labels: { padding: 20, usePointStyle: true, pointStyle: 'circle' }
+                    }
+                  }
+                }
+              });
+              this.loadPostureDistribution();
+            }
+          }, 200);
+        }
       
       // 初始化坐姿评分趋势图
       const trendCtx = document.getElementById('scoreTrendChart').getContext('2d');
@@ -464,8 +550,25 @@ export default {
       this.animateCharts();
     },
     loadPostureData() {
-      // 仍保留其他卡片的模拟更新；饼图与统计改为走后端
-      console.log(`加载${this.currentTimeRange}时间范围的数据`);
+      // 饼图与不良时段分布走后端，其他图表保留模拟
+      this.loadPostureDistribution();
+      this.loadBadTimeslots();
+    },
+    async loadBadTimeslots(){
+      try{
+        const res = await fetch(`/api/monitor/posture/bad_timeslots?timeRange=${this.currentTimeRange}`);
+        if(!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const labels = Array.isArray(data.labels) ? data.labels : ['8-10','10-12','12-14','14-16','16-18','18-20'];
+        const counts = Array.isArray(data.counts) ? data.counts : [0,0,0,0,0,0];
+        if(this.charts.heatmap){
+          this.charts.heatmap.data.labels = labels;
+          this.charts.heatmap.data.datasets[0].data = counts;
+          this.charts.heatmap.update('active');
+        }
+      }catch(e){
+        console.warn('不良时段分布加载失败，使用模拟数据');
+      }
     },
     async loadPostureDistribution() {
       try {
@@ -475,9 +578,32 @@ export default {
         const data = await res.json();
         // data: { labels, data:[%], rawSeconds:[good,mild,moderate,severe], totalSeconds }
         const labels = Array.isArray(data.labels) ? data.labels : ['良好坐姿','轻度不良','中度不良','严重不良'];
-        let percents = Array.isArray(data.data) ? data.data : [0,0,0,0];
-        const raw = Array.isArray(data.rawSeconds) ? data.rawSeconds : [0,0,0,0];
+        // 原始秒数，尽量转成数字
+        const raw = (Array.isArray(data.rawSeconds) ? data.rawSeconds : [0,0,0,0]).map(v=>Number(v)||0);
         const [goodS=0, mildS=0, moderateS=0, severeS=0] = raw;
+        const secondsTotal = goodS + mildS + moderateS + severeS;
+        // 百分比：优先使用后端给的 data；若为空/长度不对/全0，则回退由 rawSeconds 计算
+        let percents = Array.isArray(data.data) ? data.data.map(v=>Number(v)||0) : [0,0,0,0];
+        const sumPerc = percents.reduce((a,b)=>a + b, 0);
+        if (percents.length !== 4 || sumPerc <= 0) {
+          if (secondsTotal > 0) {
+            const tmp = [goodS, mildS, moderateS, severeS];
+            percents = tmp.map(v => parseFloat(((v*100)/secondsTotal).toFixed(1)));
+          } else {
+            percents = [100,0,0,0];
+          }
+        }
+        // 若仅有良好占比而其余为0，但坏姿态秒数存在，则把剩余占比至少分配给“轻度不良”，避免只显示纯绿色圆环
+        const badPercSum = (percents[1] || 0) + (percents[2] || 0) + (percents[3] || 0);
+        if (badPercSum === 0 && secondsTotal > 0 && (mildS + moderateS + severeS) > 0) {
+          const rest = Math.max(0, 100 - (percents[0] || 0));
+          percents = [percents[0] || 0, rest, 0, 0];
+        }
+        // 归一化到100（处理四舍五入导致的和不为100）
+        const totalPerc = percents.reduce((a,b)=>a+b, 0);
+        if (totalPerc > 0 && Math.abs(totalPerc - 100) > 0.5) {
+          percents = percents.map(v => parseFloat((v * 100 / totalPerc).toFixed(1)));
+        }
         const badS = mildS + moderateS + severeS;
         const fmtH = (sec) => `${(sec/3600).toFixed(1)}h`;
 
@@ -493,11 +619,27 @@ export default {
           goodRate: `${(percents[0] || 0)}%`
         });
 
-        // 更新饼图
+  // 同步自定义图例
+  this.pieLegend.labels = labels;
+  this.pieLegend.percents = percents.map(v => typeof v === 'number' ? Number(v.toFixed(1)) : Number(v) || 0);
+
+  // 更新饼图
         if (this.charts.posturePie) {
           this.charts.posturePie.data.labels = labels;
           this.charts.posturePie.data.datasets[0].data = percents;
           this.charts.posturePie.update();
+      // 数据更新后再触发一次轻量刷新，修正初始尺寸问题
+      this.refreshChartsNTimes(1, 0);
+        } else {
+          // 如果此时图表尚未初始化，稍后重试一次更新
+          setTimeout(() => {
+            if (this.charts.posturePie) {
+              this.charts.posturePie.data.labels = labels;
+              this.charts.posturePie.data.datasets[0].data = percents;
+              this.charts.posturePie.update();
+        this.refreshChartsNTimes(1, 0);
+            }
+          }, 250);
         }
       } catch (err) {
         console.error('加载坐姿时间占比失败，使用占位：', err);

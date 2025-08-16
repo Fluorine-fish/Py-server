@@ -242,16 +242,20 @@ export default {
         
         // 调用API获取数据
         const response = await fetch(`/api/monitor/posture/images?page=${currentPage.value}&limit=12&filter_type=${filterType.value}`);
-        const data = await response.json();
-        
+        const json = await response.json();
+        const arr = Array.isArray(json) ? json : (json.data || []);
         if (currentPage.value === 1) {
-          images.value = data;
+          images.value = arr;
         } else {
-          images.value = [...images.value, ...data];
+          images.value = [...images.value, ...arr];
         }
-        
-        // 如果返回的数据少于请求的数量，说明没有更多数据了
-        hasMore.value = data.length === 12;
+        // 依据分页信息或返回数量判断是否还有更多
+        if (json && typeof json.total === 'number' && typeof json.page === 'number' && typeof json.limit === 'number') {
+          const loaded = json.page * json.limit;
+          hasMore.value = loaded < json.total;
+        } else {
+          hasMore.value = arr.length === 12;
+        }
       } catch (error) {
         console.error('获取坐姿图像失败:', error);
       } finally {
