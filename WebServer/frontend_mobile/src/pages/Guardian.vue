@@ -9,7 +9,7 @@
       </div>
       <div class="mobile-card-content">
         <div class="video-container">
-          <img :src="videoUrl" class="video-stream" alt="实时监控" />
+          <img :src="videoUrl" class="video-stream" alt="实时监控" @error="onVideoError" />
           <div class="video-overlay">
             <div class="video-status">
               <i class="bi bi-circle-fill text-danger"></i> 实时
@@ -176,6 +176,13 @@ let chartInstance = null;
 
 // 视频流URL
 const videoUrl = ref('/api/video');
+const onVideoError = (e) => {
+  const img = e?.target
+  if (img && img.src && !img.dataset?.fallback) {
+    img.dataset.fallback = '1'
+    img.src = '/api/video/fallback?t=' + Date.now()
+  }
+}
 
 // 监护设置状态
 const notificationOn = ref(true);

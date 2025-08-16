@@ -2121,7 +2121,7 @@
             const container = document.getElementById('posture-images-container');
             
             // 发起API请求获取最近的坐姿图像
-            fetch('/api/get_posture_images?page=1&per_page=4')
+            fetch('/api/monitor/posture/images?page=1&limit=4')
                 .then(response => response.json())
                 .then(data => {
                     // 清空加载指示器
@@ -2188,14 +2188,10 @@
             }
             
             // 发起API请求获取坐姿统计数据
-            fetch(`/api/get_posture_stats?time_range=${currentTimeRange}`)
+        fetch(`/api/monitor/posture/distribution?timeRange=${currentTimeRange}`)
                 .then(response => response.json())
                 .then(data => {
-                    if (data.status === 'success') {
-                        updatePostureUI(data.posture_stats);
-                    } else {
-                        console.error('获取坐姿统计数据失败:', data.message);
-                    }
+            updatePostureUI(data);
                 })
                 .catch(error => {
                     console.error('请求坐姿统计数据出错:', error);
@@ -2203,41 +2199,28 @@
         }
         
         // 更新坐姿统计UI
-        function updatePostureUI(stats) {
+        function updatePostureUI(payload) {
             // 获取饼图实例
             const posturePieChart = Chart.getChart('posturePieChart');
             
             if (posturePieChart) {
                 // 更新饼图数据
-                posturePieChart.data.datasets[0].data = [
-                    stats.good.percentage,
-                    stats.mild.percentage,
-                    stats.moderate.percentage,
-                    stats.severe.percentage
-                ];
+            const arr = Array.isArray(payload.data) ? payload.data : [0,0,0,0];
+            posturePieChart.data.datasets[0].data = arr;
                 posturePieChart.update();
             }
             
             // 更新统计卡片信息
             const statItems = document.querySelectorAll('.stat-item');
             if (statItems.length >= 3) {
-                // 良好坐姿时间
-                statItems[0].querySelector('.stat-value').textContent = stats.good.formatted_time;
-                
-                // 不良坐姿时间 (mild + moderate + severe)
-                const badSeconds = stats.mild.seconds + stats.moderate.seconds + stats.severe.seconds;
-                let badTimeFormatted = '';
-                const hours = Math.floor(badSeconds / 3600);
-                const minutes = Math.floor((badSeconds % 3600) / 60);
-                if (hours > 0) {
-                    badTimeFormatted = `${hours}h ${minutes}m`;
-                } else {
-                    badTimeFormatted = `${minutes}m`;
-                }
-                statItems[1].querySelector('.stat-value').textContent = badTimeFormatted;
-                
-                // 良好率
-                statItems[2].querySelector('.stat-value').textContent = `${stats.good_posture_percentage}%`;
+            const raw = Array.isArray(payload.rawSeconds) ? payload.rawSeconds : [0,0,0,0];
+            const fmt = (sec)=>`${(sec/3600).toFixed(1)}h`;
+            const goodS = raw[0]||0;
+            const badS = (raw[1]||0)+(raw[2]||0)+(raw[3]||0);
+            statItems[0].querySelector('.stat-value').textContent = fmt(goodS);
+            statItems[1].querySelector('.stat-value').textContent = fmt(badS);
+            const arr = Array.isArray(payload.data) ? payload.data : [0,0,0,0];
+            statItems[2].querySelector('.stat-value').textContent = `${arr[0]||0}%`;
             }
         }
         

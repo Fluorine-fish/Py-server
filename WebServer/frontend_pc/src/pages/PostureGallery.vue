@@ -241,7 +241,7 @@ export default {
         loading.value = true;
         
         // 调用API获取数据
-        const response = await fetch(`/api/monitor/posture/images?page=${currentPage.value}&limit=12&filter_type=${filterType.value}`);
+  const response = await fetch(`/api/monitor/posture/images?page=${currentPage.value}&limit=12&filter_type=${filterType.value}`);
         const json = await response.json();
         const arr = Array.isArray(json) ? json : (json.data || []);
         if (currentPage.value === 1) {
@@ -283,7 +283,7 @@ export default {
     const openImageDetail = async (image) => {
       try {
         loading.value = true;
-        const response = await fetch(`/api/monitor/posture/images/${image.id}`);
+  const response = await fetch(`/api/monitor/posture/images/${image.id}`);
         currentImage.value = await response.json();
         showDetail.value = true;
       } catch (error) {

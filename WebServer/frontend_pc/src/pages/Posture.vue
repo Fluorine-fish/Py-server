@@ -36,25 +36,6 @@
         <div class="chart-container">
           <canvas id="posturePieChart"></canvas>
         </div>
-        <!-- 自定义图例：确保始终显示 -->
-        <div class="legend-grid">
-          <div class="legend-item">
-            <span class="legend-dot good"></span>
-            <span class="legend-text">{{ pieLegend.labels[0] }} {{ pieLegend.percents[0] }}%</span>
-          </div>
-          <div class="legend-item">
-            <span class="legend-dot mild"></span>
-            <span class="legend-text">{{ pieLegend.labels[1] }} {{ pieLegend.percents[1] }}%</span>
-          </div>
-          <div class="legend-item">
-            <span class="legend-dot moderate"></span>
-            <span class="legend-text">{{ pieLegend.labels[2] }} {{ pieLegend.percents[2] }}%</span>
-          </div>
-          <div class="legend-item">
-            <span class="legend-dot severe"></span>
-            <span class="legend-text">{{ pieLegend.labels[3] }} {{ pieLegend.percents[3] }}%</span>
-          </div>
-        </div>
         <div class="stats-grid">
           <div class="stat-item">
             <div class="stat-value">{{ stats.goodPostureHours }}</div>
@@ -158,6 +139,7 @@
 import Chart from 'chart.js/auto';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
+import { markRaw } from 'vue';
 
 export default {
   name: 'PosturePage',
@@ -180,6 +162,7 @@ export default {
       },
   postureImages: [],
       charts: {
+        // 用 markRaw 包裹 Chart 实例，避免被 Vue 的响应式代理
         posturePie: null,
         scoreTrend: null,
         heatmap: null,
@@ -191,11 +174,9 @@ export default {
   mounted() {
     this.$nextTick(() => {
       setTimeout(() => {
-        this.initCharts();
-        this.loadPostureData();
+  this.initCharts();
+  this.loadPostureData();
   this.loadLatestImages();
-  // 初次渲染后主动刷新图表两次，避免初始布局尺寸导致的绘制异常
-  this.refreshChartsNTimes(2, 180);
       }, 300);
     });
     
@@ -206,8 +187,14 @@ export default {
     
     // 监听窗口大小变化，调整图表大小
     window.addEventListener('resize', this.resizeCharts);
-    // 页面可见性改变时，返回可见主动刷新一次
-    this._onVisibilityChange = () => { if (!document.hidden) this.refreshChartsNTimes(2, 150); };
+    // 页面可见性改变时，返回可见仅做一次轻量刷新
+    this._onVisibilityChange = () => { 
+      if (!document.hidden) {
+        this.resizeCharts();
+        // 仅更新一次饼图数据，避免递归
+        this.loadPostureDistribution();
+      }
+    };
     document.addEventListener('visibilitychange', this._onVisibilityChange);
   },
   beforeUnmount() {
@@ -218,30 +205,39 @@ export default {
     document.removeEventListener('visibilitychange', this._onVisibilityChange);
   },
   methods: {
+    // 生成绝对 API URL，确保以站点根为基准，避免相对路径受 /pc/ 影响
+    _apiUrl(path, params) {
+      const url = new URL(path, window.location.origin);
+      if (params && typeof params === 'object') {
+        Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+      }
+      return url.toString();
+    },
+    // 去除强制重建，避免在插件生命周期内递归触发更新
+    forceReinitializeCharts() {
+      // 保留空实现用于兼容旧调用
+      this.resizeCharts();
+    },
+    
     // 刷新所有图表一次
     refreshChartsOnce() {
       try {
-        this.resizeCharts();
+        // 先尝试更新，再在可见时 resize，避免把图表调整到 0 宽度
         for (const key in this.charts) {
-          if (this.charts[key] && typeof this.charts[key].update === 'function') {
-            this.charts[key].update('none');
-          }
+          const chart = this.charts[key];
+          if (!chart || typeof chart.update !== 'function') continue;
+          try { chart.update(); } catch (_) {}
         }
+        this.resizeCharts();
       } catch (e) { console.warn('refreshChartsOnce warn:', e); }
     },
     // 在短时间内刷新N次，提高初次可见时的稳定性
-    refreshChartsNTimes(n = 2, delay = 150) {
-      let i = 0;
-      const tick = () => {
-        this.refreshChartsOnce();
-        i += 1;
-        if (i < n) setTimeout(tick, delay);
-      };
-      setTimeout(tick, 0);
+    refreshChartsNTimes() {
+      // 已废弃，避免递归刷新导致堆栈溢出
     },
-    async loadLatestImages(){
+  async loadLatestImages(){
       try{
-        const res = await fetch('/api/monitor/posture/images?page=1&limit=4');
+    const res = await fetch(this._apiUrl('/api/monitor/posture/images', { page: 1, limit: 4 }));
         const json = await res.json();
         // 兼容两种返回格式：{data: [...]} 或直接数组
         const arr = Array.isArray(json) ? json : (json.data || []);
@@ -257,90 +253,124 @@ export default {
       }
     },
     initCharts() {
+      if (this._chartsInitInProgress) {
+        console.log('图表初始化进行中，跳过');
+        return;
+      }
+      this._chartsInitInProgress = true;
       try {
-        // 初始化坐姿饼图
+        console.log('开始初始化坐姿页面图表...');
+        
+        // 初始化坐姿饼图（等待容器尺寸可用再创建）
         const el = document.getElementById('posturePieChart');
-        if (el) {
-          const pieCtx = el.getContext('2d');
-          this.charts.posturePie = new Chart(pieCtx, {
-          type: 'doughnut',
-          data: {
-            labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'],
-            datasets: [{
-              // 初始给出可见占位，避免后端数据未到时图表完全空白
-              data: [100, 0, 0, 0],
-              backgroundColor: [
-                '#34a853',
-                '#fbbc05',
-                '#ff9800',
-                '#ea4335'
-              ],
-              borderWidth: 0
-            }]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            cutout: '70%',
-            plugins: {
-              legend: {
-                display: true,
-                position: 'bottom',
-                labels: {
-                  padding: 20,
-                  usePointStyle: true,
-                  pointStyle: 'circle'
-                }
-              },
-              tooltip: {
-                callbacks: {
-                  label: function (context) {
-                    return `${context.label}: ${context.raw}%`;
-                  }
-                }
-              }
-            }
+        const tryInitPie = (retries = 15) => {
+          const node = document.getElementById('posturePieChart');
+          if (!node) { 
+            console.warn(`饼图容器未找到，剩余重试次数: ${retries}`);
+            if (retries > 0) return setTimeout(() => tryInitPie(retries-1), 100); 
+            console.error('坐姿饼图容器未找到，初始化失败');
+            return; 
           }
-        });
-        // 初始化后立即拉取一次后端数据以填充饼图与统计
-        this.loadPostureDistribution();
-        } else {
-          // 若元素尚未挂载，只延迟初始化饼图本身，不影响其它图表初始化
-          setTimeout(() => {
-            const n = document.getElementById('posturePieChart');
-            if (n && !this.charts.posturePie) {
-              const ctx = n.getContext('2d');
-              this.charts.posturePie = new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                  labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'],
-                  datasets: [{
-                    data: [100, 0, 0, 0],
-                    backgroundColor: ['#34a853','#fbbc05','#ff9800','#ea4335'],
-                    borderWidth: 0
-                  }]
-                },
-                options: {
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  cutout: '70%',
-                  plugins: {
-                    legend: {
-                      display: true,
-                      position: 'bottom',
-                      labels: { padding: 20, usePointStyle: true, pointStyle: 'circle' }
+          const parent = node.parentElement;
+          const rect = parent && parent.getBoundingClientRect ? parent.getBoundingClientRect() : { width: 0, height: 0 };
+          if (rect.width <= 10 || rect.height <= 10) {
+            console.warn(`饼图容器尺寸异常: ${rect.width}x${rect.height}，剩余重试次数: ${retries}`);
+            if (retries > 0) return setTimeout(() => tryInitPie(retries-1), 100);
+            console.warn('坐姿饼图容器尺寸异常，但继续创建:', rect);
+          }
+          if (this.charts.posturePie) {
+            console.log('坐姿饼图已存在，跳过重复创建');
+            return; // 已创建
+          }
+          
+          try {
+            const pieCtx = node.getContext('2d');
+            // 将 Chart 实例标记为非响应式，避免深层 Proxy 递归
+            this.charts.posturePie = markRaw(new Chart(pieCtx, {
+              // 与 main.html 保持一致，使用圆环图
+              type: 'doughnut',
+              data: {
+                labels: ['良好坐姿', '轻度不良', '中度不良', '严重不良'],
+                datasets: [{
+                  // 初始占位：全部为良好，避免全0导致不可见
+                  data: [100, 0, 0, 0],
+                  backgroundColor: [
+                    '#34a853',
+                    '#fbbc05',
+                    '#ff9800',
+                    '#ea4335'
+                  ],
+                  borderWidth: 0
+                }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                resizeDelay: 200,
+                cutout: '70%',
+                plugins: {
+                  legend: {
+                    position: 'bottom',
+                    labels: { 
+                      padding: 20, 
+                      usePointStyle: true, 
+                      pointStyle: 'circle',
+                      font: { size: 12 }
+                    }
+                  },
+                  tooltip: {
+                    callbacks: {
+                      label: function (context) {
+                        return `${context.label}: ${context.raw}%`;
+                      }
                     }
                   }
-                }
-              });
-              this.loadPostureDistribution();
+                },
+                layout: { padding: 10 }
+              }
+            }));
+            
+            console.log('坐姿饼图初始化成功');
+            
+            // 当图表进入可视区时再次更新，避免初始不可见导致的空白
+            try {
+              const obs = new IntersectionObserver((entries) => {
+                entries.forEach(e => {
+                  if (e.isIntersecting && this.charts.posturePie) {
+                    try { 
+                      this.charts.posturePie.resize(); 
+                      this.charts.posturePie.update(); 
+                      console.log('坐姿饼图进入可视区域，已更新');
+                    } catch(_) {}
+                  }
+                });
+              }, { root: null, threshold: 0.1 });
+              obs.observe(node);
+            } catch(_) {}
+            
+            // 初始化后拉取一次后端数据以填充饼图与统计
+            setTimeout(() => this.loadPostureDistribution(), 200);
+            
+          } catch (error) {
+            console.error('创建坐姿饼图时出错:', error);
+            if (retries > 0) {
+              setTimeout(() => tryInitPie(retries-1), 200);
             }
-          }, 200);
+          }
+        };
+        
+        if (el) {
+          tryInitPie();
+        } else {
+          setTimeout(() => tryInitPie(), 200);
         }
       
-      // 初始化坐姿评分趋势图
-      const trendCtx = document.getElementById('scoreTrendChart').getContext('2d');
-      this.charts.scoreTrend = new Chart(trendCtx, {
+      // 初始化坐姿评分趋势图（若已存在则跳过）
+      if (!this.charts.scoreTrend) {
+        const trendCanvas = document.getElementById('scoreTrendChart');
+        if (trendCanvas) {
+          const trendCtx = trendCanvas.getContext('2d');
+          this.charts.scoreTrend = markRaw(new Chart(trendCtx, {
         type: 'line',
         data: {
           labels: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
@@ -385,11 +415,16 @@ export default {
           responsive: true,
           maintainAspectRatio: false
         }
-      });
+          }));
+        }
+      }
       
-      // 初始化不良坐姿时段分布图
-      const heatmapCtx = document.getElementById('heatmapChart').getContext('2d');
-      this.charts.heatmap = new Chart(heatmapCtx, {
+      // 初始化不良坐姿时段分布图（若已存在则跳过）
+      if (!this.charts.heatmap) {
+        const heatCanvas = document.getElementById('heatmapChart');
+        if (heatCanvas) {
+          const heatmapCtx = heatCanvas.getContext('2d');
+          this.charts.heatmap = markRaw(new Chart(heatmapCtx, {
         type: 'bar',
         data: {
           labels: ['8-10', '10-12', '12-14', '14-16', '16-18', '18-20'],
@@ -425,11 +460,16 @@ export default {
             }
           }
         }
-      });
+          }));
+        }
+      }
       
-      // 初始化雷达图
-      const radarCtx = document.getElementById('radarChart').getContext('2d');
-      this.charts.radar = new Chart(radarCtx, {
+      // 初始化雷达图（若已存在则跳过）
+      if (!this.charts.radar) {
+        const radarCanvas = document.getElementById('radarChart');
+        if (radarCanvas) {
+          const radarCtx = radarCanvas.getContext('2d');
+          this.charts.radar = markRaw(new Chart(radarCtx, {
         type: 'radar',
         data: {
           labels: ['即时纠正率', '提醒响应速度', '持续坐姿时间', '重复提醒次数', '自主调整率'],
@@ -473,11 +513,16 @@ export default {
           responsive: true,
           maintainAspectRatio: false
         }
-      });
+          }));
+        }
+      }
       
-      // 脊柱健康风险图
-      const riskCtx = document.getElementById('riskChart').getContext('2d');
-      this.charts.risk = new Chart(riskCtx, {
+      // 脊柱健康风险图（若已存在则跳过）
+      if (!this.charts.risk) {
+        const riskCanvas = document.getElementById('riskChart');
+        if (riskCanvas) {
+          const riskCtx = riskCanvas.getContext('2d');
+          this.charts.risk = markRaw(new Chart(riskCtx, {
         type: 'bar',
         data: {
           labels: ['颈椎风险', '腰椎风险', '胸椎风险', '整体风险'],
@@ -526,65 +571,122 @@ export default {
           responsive: true,
           maintainAspectRatio: false
         }
-      });
+          }));
+        }
+      }
+      this._chartsInitInProgress = false;
       } catch (error) {
         console.error('图表初始化错误:', error);
         // 如果图表初始化失败，可以显示错误信息或使用备用方案
+        this._chartsInitInProgress = false;
       }
     },
     
     resizeCharts() {
+      const delayed = [];
       for (const key in this.charts) {
-        if (this.charts[key]) {
-          this.charts[key].resize();
+        const chart = this.charts[key];
+        if (!chart) continue;
+        const canvas = chart.canvas;
+        const parent = canvas && canvas.parentNode;
+        if (!parent || typeof parent.getBoundingClientRect !== 'function') continue;
+        const rect = parent.getBoundingClientRect();
+        if (rect.width > 10 && rect.height > 10) {
+          try { chart.resize(); } catch(_) {}
+        } else {
+          delayed.push(chart);
         }
+      }
+      if (delayed.length) {
+        // 容器还未完成布局，稍后再尝试一次
+        setTimeout(() => {
+          delayed.forEach(c => { try { c.resize(); c.update(); } catch(_) {} });
+        }, 200);
       }
     },
     changeTimeRange(range) {
       this.currentTimeRange = range;
-      this.loadPostureData();
-      // 切换时间范围时同时刷新饼图分布
+      // 饼图走后端，其它图表使用假数据更新
       this.loadPostureDistribution();
-      
-      // 更新图表数据显示
-      this.animateCharts();
+      this.updateMockCharts();
     },
     loadPostureData() {
-      // 饼图与不良时段分布走后端，其他图表保留模拟
+      // 饼图走后端，其他图表保留模拟
       this.loadPostureDistribution();
-      this.loadBadTimeslots();
+      this.updateMockCharts();
     },
-    async loadBadTimeslots(){
-      try{
-        const res = await fetch(`/api/monitor/posture/bad_timeslots?timeRange=${this.currentTimeRange}`);
-        if(!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const labels = Array.isArray(data.labels) ? data.labels : ['8-10','10-12','12-14','14-16','16-18','18-20'];
-        const counts = Array.isArray(data.counts) ? data.counts : [0,0,0,0,0,0];
-        if(this.charts.heatmap){
-          this.charts.heatmap.data.labels = labels;
-          this.charts.heatmap.data.datasets[0].data = counts;
-          this.charts.heatmap.update('active');
-        }
-      }catch(e){
-        console.warn('不良时段分布加载失败，使用模拟数据');
+    // 其他四个图表使用假数据（按时间范围生成不同维度数据）
+    updateMockCharts(){
+      // 评分趋势
+      const ranges = {
+        day: { labels: Array.from({length: 12}, (_,i)=>`${8+i}:00`), min: 65, max: 90 },
+        week: { labels: ['周一','周二','周三','周四','周五','周六','周日'], min: 65, max: 90 },
+        month: { labels: ['第1周','第2周','第3周','第4周'], min: 60, max: 92 }
+      };
+      const r = ranges[this.currentTimeRange] || ranges.week;
+      const rand = (a,b)=>Math.round(a + Math.random()*(b-a));
+      const smooth = (arr)=>arr.map((v,i)=>{
+        if (i===0||i===arr.length-1) return v;
+        return Math.round((arr[i-1]+v+arr[i+1])/3);
+      });
+      const trendData = smooth(Array.from({length: r.labels.length}, ()=>rand(r.min, r.max)));
+      if (this.charts.scoreTrend){
+        this.charts.scoreTrend.data.labels = r.labels;
+        this.charts.scoreTrend.data.datasets[0].data = trendData;
+          this.charts.scoreTrend.update();
+      }
+
+      // 不良坐姿时段分布（柱状）
+      const slotLabels = this.currentTimeRange === 'day' 
+        ? ['8-10','10-12','12-14','14-16','16-18','18-20']
+        : ['上午','中午','下午','傍晚','晚上'];
+      const slotCounts = slotLabels.map(()=>rand(0, 9));
+      if (this.charts.heatmap){
+        this.charts.heatmap.data.labels = slotLabels;
+        this.charts.heatmap.data.datasets[0].data = slotCounts;
+  this.charts.heatmap.update();
+      }
+
+      // 雷达图（本周/上周）
+      const mkRadar = ()=>[rand(40,85),rand(40,85),rand(40,85),rand(30,70),rand(35,80)];
+      if (this.charts.radar){
+        this.charts.radar.data.datasets[0].data = mkRadar();
+        this.charts.radar.data.datasets[1].data = mkRadar();
+  this.charts.radar.update();
+      }
+
+      // 脊柱健康风险
+      if (this.charts.risk){
+        this.charts.risk.data.datasets[0].data = [rand(20,40), rand(18,36), rand(15,35), rand(18,38)];
+  this.charts.risk.update();
       }
     },
     async loadPostureDistribution() {
-      try {
-        const params = new URLSearchParams({ timeRange: this.currentTimeRange });
-        const res = await fetch(`/api/monitor/posture/distribution?${params.toString()}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        // data: { labels, data:[%], rawSeconds:[good,mild,moderate,severe], totalSeconds }
-        const labels = Array.isArray(data.labels) ? data.labels : ['良好坐姿','轻度不良','中度不良','严重不良'];
-        // 原始秒数，尽量转成数字
-        const raw = (Array.isArray(data.rawSeconds) ? data.rawSeconds : [0,0,0,0]).map(v=>Number(v)||0);
-        const [goodS=0, mildS=0, moderateS=0, severeS=0] = raw;
+    // 统一的处理函数：从 FastAPI distribution 组装绘图数据
+      const handleAndRender = (payload) => {
+  // payload 来自 FastAPI 接口
+        let labels = ['良好坐姿','轻度不良','中度不良','严重不良'];
+        let goodS = 0, mildS = 0, moderateS = 0, severeS = 0;
+        let percents = [0,0,0,0];
+
+        if (payload && Array.isArray(payload.rawSeconds)) {
+          // FastAPI /api/monitor/posture/distribution
+          labels = Array.isArray(payload.labels) ? payload.labels.map(l => {
+            // 文案统一
+            if (l.includes('良好')) return '良好坐姿';
+            if (l.includes('轻')) return '轻度不良';
+            if (l.includes('中')) return '中度不良';
+            if (l.includes('重')) return '严重不良';
+            return l;
+          }) : labels;
+          const raw = payload.rawSeconds.map(v => Number(v) || 0);
+          [goodS, mildS, moderateS, severeS] = raw;
+          percents = Array.isArray(payload.data) ? payload.data.map(v => Number(v) || 0) : [0,0,0,0];
+  }
+
         const secondsTotal = goodS + mildS + moderateS + severeS;
-        // 百分比：优先使用后端给的 data；若为空/长度不对/全0，则回退由 rawSeconds 计算
-        let percents = Array.isArray(data.data) ? data.data.map(v=>Number(v)||0) : [0,0,0,0];
-        const sumPerc = percents.reduce((a,b)=>a + b, 0);
+        // 若百分比不可用，用原始秒数计算
+        const sumPerc = percents.reduce((a,b)=>a+b, 0);
         if (percents.length !== 4 || sumPerc <= 0) {
           if (secondsTotal > 0) {
             const tmp = [goodS, mildS, moderateS, severeS];
@@ -593,57 +695,42 @@ export default {
             percents = [100,0,0,0];
           }
         }
-        // 若仅有良好占比而其余为0，但坏姿态秒数存在，则把剩余占比至少分配给“轻度不良”，避免只显示纯绿色圆环
-        const badPercSum = (percents[1] || 0) + (percents[2] || 0) + (percents[3] || 0);
-        if (badPercSum === 0 && secondsTotal > 0 && (mildS + moderateS + severeS) > 0) {
-          const rest = Math.max(0, 100 - (percents[0] || 0));
-          percents = [percents[0] || 0, rest, 0, 0];
-        }
-        // 归一化到100（处理四舍五入导致的和不为100）
+        // 归一化
         const totalPerc = percents.reduce((a,b)=>a+b, 0);
         if (totalPerc > 0 && Math.abs(totalPerc - 100) > 0.5) {
           percents = percents.map(v => parseFloat((v * 100 / totalPerc).toFixed(1)));
         }
+        // 占位与可视优化
         const badS = mildS + moderateS + severeS;
-        const fmtH = (sec) => `${(sec/3600).toFixed(1)}h`;
-
-        // 若后端暂无数据导致全为0，设置一个可视化占位，避免饼图看起来空白
         if ((goodS + badS) === 0 || (percents.reduce((a,b)=>a+b,0) === 0)) {
           percents = [100,0,0,0];
         }
-
         // 更新统计卡片
+        const fmtH = (sec) => `${(sec/3600).toFixed(1)}h`;
         this.updateChartData({
           goodPostureHours: fmtH(goodS),
           badPostureHours: fmtH(badS),
           goodRate: `${(percents[0] || 0)}%`
         });
-
-  // 同步自定义图例
-  this.pieLegend.labels = labels;
-  this.pieLegend.percents = percents.map(v => typeof v === 'number' ? Number(v.toFixed(1)) : Number(v) || 0);
-
-  // 更新饼图
+        // 更新 legend
+        this.pieLegend.labels = labels;
+        this.pieLegend.percents = percents.map(v => typeof v === 'number' ? Number(v.toFixed(1)) : Number(v) || 0);
+        // 更新图表
         if (this.charts.posturePie) {
           this.charts.posturePie.data.labels = labels;
           this.charts.posturePie.data.datasets[0].data = percents;
-          this.charts.posturePie.update();
-      // 数据更新后再触发一次轻量刷新，修正初始尺寸问题
-      this.refreshChartsNTimes(1, 0);
-        } else {
-          // 如果此时图表尚未初始化，稍后重试一次更新
-          setTimeout(() => {
-            if (this.charts.posturePie) {
-              this.charts.posturePie.data.labels = labels;
-              this.charts.posturePie.data.datasets[0].data = percents;
-              this.charts.posturePie.update();
-        this.refreshChartsNTimes(1, 0);
-            }
-          }, 250);
+          try { this.charts.posturePie.update(); } catch (_) {}
         }
+      };
+
+      try {
+  const url = this._apiUrl('/api/monitor/posture/distribution', { timeRange: this.currentTimeRange });
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`distribution HTTP ${res.status}`);
+        const data = await res.json();
+        handleAndRender(data);
       } catch (err) {
-        console.error('加载坐姿时间占比失败，使用占位：', err);
-        // 保底：不修改现有图，避免打断用户
+  console.error('加载坐姿时间占比失败：', err);
       }
     },
     updateChartData(stats) {
@@ -655,18 +742,7 @@ export default {
         console.error('更新图表数据时出错:', error);
       }
     },
-    animateCharts() {
-      try {
-        // 为图表添加动画效果，使数据更新更加生动
-        for (const key in this.charts) {
-          if (this.charts[key] && typeof this.charts[key].update === 'function') {
-            this.charts[key].update('normal');
-          }
-        }
-      } catch (error) {
-        console.error('图表动画更新时出错:', error);
-      }
-    },
+  // 移除统一动画强制更新，避免潜在递归更新
     viewPostureImage(image) {
       // 在实际应用中，这里可以打开一个模态框显示大图
       alert(`查看坐姿图像: ${image.posture_status}, 时间: ${this.formatTime(image.timestamp)}`);
@@ -815,7 +891,50 @@ export default {
   position: relative;
   height: 250px;
   width: 100%;
+  min-height: 250px;
+  overflow: hidden;
 }
+
+.chart-container canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* 确保饼图容器有足够的空间 */
+.card .chart-container {
+  margin: 10px 0;
+  padding: 10px;
+}
+
+/* 自定义图例样式 */
+.legend-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 16px;
+  margin-top: 10px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--text-color);
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.legend-dot.good { background-color: #34a853; }
+.legend-dot.mild { background-color: #fbbc05; }
+.legend-dot.moderate { background-color: #ff9800; }
+.legend-dot.severe { background-color: #ea4335; }
 
 .stats-grid {
   display: grid;

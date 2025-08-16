@@ -416,9 +416,9 @@ export default {
       }
     },
     handleVideoError() {
-      // 使用数据URI显示错误（可以在浏览器控制台中查看）
-      const errorDataURI = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQwIiBoZWlnaHQ9IjQ4MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjVmNWY1Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIyNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSI+6KeG6aKR6L+e5o6l5aSx6LSlPC90ZXh0Pjwvc3ZnPg==';
-      this.videoSource = errorDataURI;
+  // 第一步：回退到后端提供的快照
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
+  this.videoSource = `${baseUrl}/api/video/fallback?t=${Date.now()}`;
       
       this.isVideoLoading = false;
       this.networkStatus = {

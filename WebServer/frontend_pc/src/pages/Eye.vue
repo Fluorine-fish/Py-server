@@ -111,24 +111,77 @@
 
 <script>
 import Chart from 'chart.js/auto';
+import { markRaw } from 'vue';
 
 export default {
   name: 'EyePage',
   data() {
     return {
-      charts: {}
+      charts: {
+        blinkRate: null,
+        eyeDistance: null,
+        restReminder: null
+      },
+      _visibilityRefreshScheduled: false
     }
   },
   mounted() {
-  this.initCharts();
-  // 接入真实数据：加载用眼趋势并更新图表
-  this.loadEyeTrends();
+    // 初始化图表（等待容器尺寸可用）
+    this.initCharts();
+    // 接入真实数据：加载用眼趋势并更新图表
+    this.loadEyeTrends();
+    // 监听窗口变化与可见性，确保初次进入后能正确渲染
+    this._onResize = () => this.forceUpdateAll();
+    window.addEventListener('resize', this._onResize);
+    this._onVisibility = () => { 
+      if (!document.hidden) {
+        // 页面变为可见时，安全刷新：避免销毁与重复创建引发递归/空 canvas
+        this.safeRefreshOnVisible();
+      }
+    };
+    document.addEventListener('visibilitychange', this._onVisibility);
+  },
+  beforeUnmount() {
+    window.removeEventListener('resize', this._onResize);
+    document.removeEventListener('visibilitychange', this._onVisibility);
   },
   methods: {
+    // 页面可见时的安全刷新：仅 resize + update，避免 destroy/recreate 造成栈溢出/空 canvas
+    safeRefreshOnVisible() {
+      if (this._visibilityRefreshScheduled) return;
+      this._visibilityRefreshScheduled = true;
+      setTimeout(() => {
+        try {
+          // 如果图表尚未初始化（切换路由首次进入），初始化一次
+          if (!this.charts.blinkRate || !this.charts.eyeDistance || !this.charts.restReminder) {
+            this.initCharts();
+          }
+          // 尝试安全刷新
+          this.forceUpdateAll(true);
+          // 轻量数据刷新
+          this.loadEyeTrends();
+        } finally {
+          this._visibilityRefreshScheduled = false;
+        }
+      }, 80);
+    },
+    
     initCharts() {
-      // 眨眼频率图表
-      const blinkRateCtx = document.getElementById('blinkRateChart').getContext('2d');
-      this.charts.blinkRate = new Chart(blinkRateCtx, {
+      const waitAndGet = (id, retries = 10) => {
+        const el = document.getElementById(id);
+        if (!el) return null;
+        const parent = el.parentElement;
+        const rect = parent && parent.getBoundingClientRect ? parent.getBoundingClientRect() : { width: 0, height: 0 };
+        if (rect.width <= 10 || rect.height <= 10) return null;
+        return el.getContext('2d');
+      };
+
+      // 眨眼频率图表（等待容器尺寸可用）
+      const initBlink = (retries = 10) => {
+        if (this.charts.blinkRate) return;
+        const ctx = waitAndGet('blinkRateChart');
+        if (!ctx) { if (retries > 0) return setTimeout(() => initBlink(retries-1), 150); else return; }
+  const _blink = new Chart(ctx, {
         type: 'line',
         data: {
           labels: ['9:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00'],
@@ -155,11 +208,19 @@ export default {
             }
           }
         }
-      });
+          });
+  this.charts.blinkRate = markRaw(_blink);
+        // 二次更新避免初次布局未完成
+        setTimeout(() => { try { this.charts.blinkRate.update(); } catch(_) {} }, 200);
+      };
+      initBlink();
       
       // 用眼距离分布图表
-      const eyeDistanceCtx = document.getElementById('eyeDistanceChart').getContext('2d');
-      this.charts.eyeDistance = new Chart(eyeDistanceCtx, {
+      const initDist = (retries = 10) => {
+        if (this.charts.eyeDistance) return;
+        const ctx = waitAndGet('eyeDistanceChart');
+        if (!ctx) { if (retries > 0) return setTimeout(() => initDist(retries-1), 150); else return; }
+  const _eyeDist = new Chart(ctx, {
         type: 'bar',
         data: {
           labels: ['<20cm', '20-30cm', '30-40cm', '40-50cm', '>50cm'],
@@ -198,10 +259,17 @@ export default {
           }
         }
       });
+  this.charts.eyeDistance = markRaw(_eyeDist);
+        setTimeout(() => { try { this.charts.eyeDistance.update(); } catch(_) {} }, 200);
+      };
+      initDist();
       
       // 休息提醒执行情况图表
-      const restReminderCtx = document.getElementById('restReminderChart').getContext('2d');
-      this.charts.restReminder = new Chart(restReminderCtx, {
+      const initRest = (retries = 10) => {
+        if (this.charts.restReminder) return;
+        const ctx = waitAndGet('restReminderChart');
+        if (!ctx) { if (retries > 0) return setTimeout(() => initRest(retries-1), 150); else return; }
+  const _rest = new Chart(ctx, {
         type: 'bar',
         data: {
           labels: ['准时休息', '延迟休息', '忽略提醒'],
@@ -234,7 +302,20 @@ export default {
               display: false
             }
           }
-        }
+        }});
+  this.charts.restReminder = markRaw(_rest);
+        setTimeout(() => { try { this.charts.restReminder.update(); } catch(_) {} }, 200);
+      };
+      initRest();
+    },
+    forceUpdateAll(resizeFirst = false){
+      const list = [this.charts.blinkRate, this.charts.eyeDistance, this.charts.restReminder];
+      list.forEach(c => {
+        if (!c) return;
+        try {
+          if (resizeFirst) c.resize();
+          c.update();
+        } catch(_) {}
       });
     },
 

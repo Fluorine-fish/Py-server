@@ -4,13 +4,14 @@
 使用共享摄像头资源，与情绪检测等模块协调工作
 """
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException, Response
+from fastapi.responses import StreamingResponse, FileResponse
 import sys
 import os
 import logging
 from typing import Generator
 import time
+from pathlib import Path
 
 # 添加上级目录到路径以导入共享摄像头
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -33,6 +34,14 @@ class VideoStreamManager:
         self.is_streaming = False
         self.frame_rate = 30  # 帧率
         self.quality = 80     # JPEG质量
+        # 快照缓存目录（项目根/static/camera_cache）
+        try:
+            self._cache_dir = Path(__file__).resolve().parents[3] / 'static' / 'camera_cache'
+            self._cache_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"创建快照缓存目录失败: {e}")
+            self._cache_dir = None
+        self._last_cache_write = 0.0
         
     def get_camera_status(self) -> dict:
         """获取共享摄像头状态"""
@@ -84,6 +93,17 @@ class VideoStreamManager:
                     # 生成multipart数据
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
+                    # 写入快照缓存（每2秒一次，原子替换）
+                    try:
+                        if self._cache_dir is not None and (time.time() - self._last_cache_write) >= 2.0:
+                            tmp_path = self._cache_dir / 'latest.tmp'
+                            final_path = self._cache_dir / 'latest.jpg'
+                            with open(tmp_path, 'wb') as f:
+                                f.write(frame_data)
+                            os.replace(tmp_path, final_path)
+                            self._last_cache_write = time.time()
+                    except Exception as e:
+                        logger.debug(f"写入快照缓存失败: {e}")
                 
                 # 控制帧率
                 elapsed = time.time() - start_time
@@ -156,6 +176,38 @@ async def video_stream():
     except Exception as e:
         logger.error(f"视频流启动失败: {e}")
         raise HTTPException(status_code=500, detail=f"视频流服务错误: {str(e)}")
+
+
+@router.get("/video/fallback")
+async def video_fallback():
+    """
+    视频流回退图片：返回最近缓存的快照，如无则返回占位图。
+    前端在 <img> 加载 /api/video 失败时应切换到该URL。
+    """
+    try:
+        cache_dir = video_manager._cache_dir or (Path(__file__).resolve().parents[3] / 'static' / 'camera_cache')
+        latest = cache_dir / 'latest.jpg'
+        if latest.exists():
+            return FileResponse(str(latest), media_type='image/jpeg', headers={"Cache-Control": "no-store"})
+        # 退回到通用占位图
+        placeholder = Path(__file__).resolve().parents[3] / 'static' / 'mobile' / 'placeholder.jpg'
+        if placeholder.exists():
+            return FileResponse(str(placeholder), media_type='image/jpeg', headers={"Cache-Control": "no-store"})
+        # 最后兜底：动态生成一张简单提示图
+        import cv2
+        import numpy as np
+        h, w = 360, 480
+        img = np.full((h, w, 3), (230, 240, 245), dtype=np.uint8)
+        ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        cv2.putText(img, "Fallback Snapshot", (40, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (70, 90, 120), 2)
+        cv2.putText(img, ts, (80, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (100, 120, 150), 2)
+        ok, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        if ok:
+            return Response(content=buf.tobytes(), media_type='image/jpeg', headers={"Cache-Control": "no-store"})
+    except Exception as e:
+        logger.error(f"回退图片生成失败: {e}")
+    # 彻底失败时返回空响应
+    raise HTTPException(status_code=500, detail="无法提供回退图片")
 
 
 @router.get("/video/status")

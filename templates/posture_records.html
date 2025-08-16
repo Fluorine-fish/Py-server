@@ -753,7 +753,7 @@
             document.getElementById('loading-indicator').style.display = 'flex';
             
             // 发起API请求获取所有坐姿图像记录
-            fetch('/api/get_posture_images?page=1&per_page=100')
+            fetch('/api/monitor/posture/images?page=1&limit=100')
                 .then(response => response.json())
                 .then(data => {
                     if (data.status === 'success') {
@@ -806,7 +806,7 @@
                 params.append('hour', hourFilter);
             }
             
-            const url = `/api/get_posture_images?${params.toString()}`;
+            const url = `/api/monitor/posture/images?${params.toString()}`;
             
             fetch(url)
                 .then(response => response.json())

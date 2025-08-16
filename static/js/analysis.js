@@ -158,15 +158,22 @@ function initTimeRangeButtons() {
 
 // 更新坐姿统计数据
 function updatePostureStats() {
-    // 发送请求获取坐姿统计数据
-    fetch(`/api/get_posture_stats?time_range=${currentTimeRange}`)
+    // 发送请求获取坐姿统计数据（FastAPI）
+    fetch(`/api/monitor/posture/distribution?timeRange=${currentTimeRange}`)
         .then(response => response.json())
         .then(data => {
-            if (data.status === 'success') {
-                displayPostureStats(data.posture_stats);
-            } else {
-                console.error('获取坐姿统计数据失败:', data.message);
-            }
+            // 适配 FastAPI 返回结构
+            const arr = Array.isArray(data.data) ? data.data : [0,0,0,0];
+            const raw = Array.isArray(data.rawSeconds) ? data.rawSeconds : [0,0,0,0];
+            const stats = {
+                total_time: { formatted_time: `${(raw.reduce((a,b)=>a+b,0)/3600).toFixed(1)}h` },
+                good_posture_percentage: arr[0] || 0,
+                good: { percentage: arr[0]||0, seconds: raw[0]||0, formatted_time: `${((raw[0]||0)/3600).toFixed(1)}h` },
+                mild: { percentage: arr[1]||0, seconds: raw[1]||0, formatted_time: `${((raw[1]||0)/3600).toFixed(1)}h` },
+                moderate: { percentage: arr[2]||0, seconds: raw[2]||0, formatted_time: `${((raw[2]||0)/3600).toFixed(1)}h` },
+                severe: { percentage: arr[3]||0, seconds: raw[3]||0, formatted_time: `${((raw[3]||0)/3600).toFixed(1)}h` }
+            };
+            displayPostureStats(stats);
         })
         .catch(error => {
             console.error('请求坐姿统计数据出错:', error);

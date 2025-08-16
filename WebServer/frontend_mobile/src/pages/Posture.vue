@@ -16,7 +16,7 @@
               <div class="video-stats-section">
                 <!-- 视频区域 -->
                 <div class="video-container-unified">
-                  <img :src="videoUrl" class="video-stream" alt="实时坐姿监测" />
+                  <img :src="videoUrl" class="video-stream" alt="实时坐姿监测" @error="onVideoError" />
                   <div class="video-overlay">
                     <div class="video-status">
                       <i class="bi bi-circle-fill text-danger"></i> 实时
@@ -83,23 +83,46 @@
         </div>
       </div>
 
-      <!-- 坐姿时间占比（除图像记录外显示） -->
-      <div v-show="activeTab!=='images'" class="mobile-card pie-card">
+      <!-- 分析/图像记录 合并为同一卡片的两个标签页 -->
+      <div class="mobile-card pie-card">
         <div class="mobile-card-header">
-          <div class="mobile-card-title">坐姿时间占比</div>
-          <div class="time-period-selector">
+          <div class="tabs">
+            <button class="tab-btn" :class="{active: activeTab==='analysis'}" @click="activeTab='analysis'">时间占比</button>
+            <button class="tab-btn" :class="{active: activeTab==='images'}" @click="activeTab='images'">图像记录</button>
+          </div>
+          <div class="time-period-selector" v-show="activeTab==='analysis'">
             <button class="period-btn" :class="{active: timePeriod==='today'}" @click="changeTimePeriod('today')">今日</button>
             <button class="period-btn" :class="{active: timePeriod==='week'}" @click="changeTimePeriod('week')">本周</button>
           </div>
         </div>
         <div class="mobile-card-content">
-          <div class="chart-container-styled pie-wrap">
-            <canvas ref="pieCanvas"></canvas>
+          <!-- 时间占比 饼图 -->
+          <div v-show="activeTab==='analysis'">
+            <div class="chart-container-styled pie-wrap">
+              <canvas ref="pieCanvas"></canvas>
+            </div>
+            <div class="pie-legend">
+              <span><i class="legend-dot dot-good"></i>良好 {{ pieDataHours.good.toFixed(1) }}h</span>
+              <span><i class="legend-dot dot-mild"></i>轻度不良 {{ pieDataHours.mild.toFixed(1) }}h</span>
+              <span><i class="legend-dot dot-bad"></i>不良 {{ pieDataHours.bad.toFixed(1) }}h</span>
+            </div>
           </div>
-          <div class="pie-legend">
-            <span><i class="legend-dot dot-good"></i>良好 {{ pieDataHours.good.toFixed(1) }}h</span>
-            <span><i class="legend-dot dot-mild"></i>轻度不良 {{ pieDataHours.mild.toFixed(1) }}h</span>
-            <span><i class="legend-dot dot-bad"></i>不良 {{ pieDataHours.bad.toFixed(1) }}h</span>
+
+          <!-- 图像记录 2x2/每页4张 -->
+          <div v-show="activeTab==='images'">
+            <div v-if="loadingImages" style="text-align:center;padding:12px;color:#666">加载中...</div>
+            <div v-else class="image-grid">
+              <div v-for="img in postureImages" :key="img.id" class="image-item" @click="viewImage(img)">
+                <img :src="img.thumbnail" alt="posture" />
+                <div class="image-badge" :class="img.is_good_posture ? 'good' : 'bad'">{{ img.is_good_posture ? '良好' : '不良' }}</div>
+                <div class="image-time">{{ formatTimeFromFilename(img) }}</div>
+              </div>
+            </div>
+            <div v-if="!loadingImages" class="pagination">
+              <button class="page-btn" @click="prevPage" :disabled="currentPage===1">上一页</button>
+              <span class="page-info">第 {{ currentPage }} / {{ totalPages }} 页</span>
+              <button class="page-btn" @click="nextPage" :disabled="currentPage===totalPages">下一页</button>
+            </div>
           </div>
         </div>
       </div>
@@ -174,7 +197,7 @@ import Chart from 'chart.js/auto'
 const monitorStore = useMonitorStore()
 
 // tab控制
-const activeTab = ref('images')
+const activeTab = ref('analysis')
 
 // 时间范围控制（保留用于其他模块扩展）
 const selectedTimeRange = ref('day')
@@ -340,12 +363,21 @@ const fetchImages = async () => {
     loadingImages.value = false
   }
 }
-const pageSize = ref(8)
+const pageSize = ref(4)
 const totalPages = ref(1)
 const totalItems = ref(0)
 const prevPage = async () => { if(currentPage.value>1){ currentPage.value--; await fetchImages() } }
 const nextPage = async () => { if(currentPage.value<totalPages.value){ currentPage.value++; await fetchImages() } }
 const viewImage = (image) => { window.open(image.url, '_blank') }
+
+// 视频错误回退到快照
+const onVideoError = (e) => {
+  const target = e?.target
+  if (target && target.src && !target.dataset?.fallback) {
+    target.dataset.fallback = '1'
+    target.src = '/api/video/fallback?t=' + Date.now()
+  }
+}
 
 // 从文件名/ID提取时间（命名形如 posture_YYYYMMDD_HHMMSS_随机值.jpg）
 const formatTimeFromFilename = (img) => {
@@ -381,21 +413,23 @@ onMounted(async () => {
 })
 
 // 不再有图表实例，卸载钩子省略
-watch(activeTab, async (v) => {
-  if (v !== 'images') {
+watch(activeTab, async (v, o) => {
+  if (v === 'analysis') {
     await nextTick()
     await renderPie()
+  } else if (v === 'images' && postureImages.value.length === 0 && !loadingImages.value) {
+    await fetchImages()
   }
 })
 </script>
 
 <style scoped>
-/* 图片网格优化 */
-.image-grid{ display:grid; grid-template-columns:1fr; gap:12px; }
+/* 图片网格优化：双排两列（每页4张） */
+.image-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
 .image-item{ position:relative; border-radius:10px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,.08); background:#f6f7f9; }
-.image-item img{ width:100%; aspect-ratio:4/3; object-fit:cover; display:block; }
-.image-item .image-time{ position:absolute; right:8px; bottom:8px; background:rgba(0,0,0,.55); color:#fff; font-size:12px; padding:4px 8px; border-radius:6px; }
-.image-item .image-badge{ position:absolute; left:8px; top:8px; font-size:12px; padding:2px 8px; border-radius:999px; color:#fff; box-shadow:0 1px 3px rgba(0,0,0,.2); }
+.image-item img{ width:100%; aspect-ratio:1/1; object-fit:cover; display:block; }
+.image-item .image-time{ position:absolute; right:6px; bottom:6px; background:rgba(0,0,0,.55); color:#fff; font-size:11px; padding:2px 6px; border-radius:6px; }
+.image-item .image-badge{ position:absolute; left:6px; top:6px; font-size:11px; padding:2px 6px; border-radius:999px; color:#fff; box-shadow:0 1px 3px rgba(0,0,0,.2); }
 .image-item .image-badge.good{ background:#34a853; }
 .image-item .image-badge.bad{ background:#ea4335; }
 
@@ -739,15 +773,13 @@ watch(activeTab, async (v) => {
 /* 坐姿时间占比 饼图样式（简洁版） */
 .pie-card { margin-top: 12px; }
 .pie-wrap { height: 260px; padding: 12px; }
-.pie-legend { display:flex; justify-content:center; gap:12px; flex-wrap: wrap; margin-top:8px; font-size:12px; color:#495057; }
+.pie-legend { display:flex; justify-content:center; gap:12px; flex-wrap: wrap; margin-top:8px; font-size:11px; color:#495057; }
 .legend-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; }
 .dot-good{ background:#34a853; }
 .dot-mild{ background:#ffc107; }
 .dot-bad{ background:#ea4335; }
 
-@media (min-width: 520px) {
-  .image-grid{ grid-template-columns:repeat(2,1fr); }
-}
+/* 保持两列，不随断点变更 */
 
 /* 饼图相关基础容器样式 */
 .chart-container-styled { display:flex; justify-content:center; align-items:center; background:#fff; border-radius:12px; }
@@ -756,6 +788,11 @@ watch(activeTab, async (v) => {
 .time-period-selector { display:flex; gap:8px; margin-left:auto; }
 .period-btn { padding:6px 12px; border:1px solid #e0e0e0; border-radius:16px; background:#fff; color:#404F48; font-size:12px; cursor:pointer; }
 .period-btn.active { background: linear-gradient(135deg, #3A8469 0%, #4a9c7a 100%); color:#fff; border-color:#3A8469; }
+
+/* 顶部标签按钮 */
+.tabs { display:flex; gap:8px; }
+.tab-btn { padding:6px 12px; border:1px solid #e0e0e0; border-radius:16px; background:#fff; color:#404F48; font-size:13px; cursor:pointer; }
+.tab-btn.active { background: linear-gradient(135deg, #3A8469 0%, #4a9c7a 100%); color:#fff; border-color:#3A8469; }
 </style>
 
 <!-- 引入样式组件 -->

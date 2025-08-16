@@ -785,7 +785,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Flask](https://img.shields.io/badge/Flask-2.0+-green.svg)](https://flask.palletsprojects.com/)
+后端已全面迁移至 FastAPI。
 [![AI Powered](https://img.shields.io/badge/AI-Powered-purple.svg)](https://dashscope.aliyun.com/)
 
 </div>
