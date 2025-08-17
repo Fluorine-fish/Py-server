@@ -43,3 +43,6 @@ EXCELENT_POSTURE_THRESHOLD = 45.0  # 优秀坐姿的阈值
 GOOD_POSTURE_THRESHOLD = 58.0  # 良好坐姿的阈值
 FAIR_POSTURE_THRESHOLD = 68.0  # 一般坐姿的阈值
 BAD_POSTURE_THRESHOLD = 75.0  # 不良坐姿的阈值
+
+# 展示版视频流控制开关，True为使用静态图片
+USE_STATIC_VIDEO_STREAM = True

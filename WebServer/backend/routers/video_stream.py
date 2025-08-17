@@ -12,6 +12,7 @@ import logging
 from typing import Generator, Optional
 import time
 from pathlib import Path
+from config import USE_STATIC_VIDEO_STREAM
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -29,8 +30,18 @@ class VideoStreamManager:
         self.is_streaming = False
         self.frame_rate = 30  # 帧率
         self.quality = 80     # JPEG质量
+        self.use_static = bool(USE_STATIC_VIDEO_STREAM)
 
-        # 展示版：静态图片路径与缓存
+        # 尝试导入共享摄像头（用于非静态模式）
+        self.shared_camera = None
+        try:
+            sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+            from video_stream import camera as _camera  # type: ignore
+            self.shared_camera = _camera
+        except Exception as e:
+            logger.warning(f"导入共享摄像头失败，将使用占位图: {e}")
+
+        # 静态图片路径与缓存
         self._root_dir = Path(__file__).resolve().parents[3]
         self._static_image_path = self._root_dir / 'static' / 'home.jpg'
         self._static_image_bytes: Optional[bytes] = None
@@ -59,14 +70,36 @@ class VideoStreamManager:
             self._static_image_bytes = None
         
     def get_camera_status(self) -> dict:
-        """返回展示版状态：静态图模式始终可用"""
+        """返回当前视频源状态"""
         try:
+            if self.use_static:
+                return {
+                    "available": True,
+                    "running": True,
+                    "frame_rate": self.frame_rate,
+                    "quality": self.quality,
+                    "mode": "静态图模式"
+                }
+            # 非静态：检查共享摄像头
+            is_available = False
+            running = False
+            mode = "物理摄像头"
+            cap = getattr(self.shared_camera, 'cap', None) if self.shared_camera else None
+            if cap is not None and hasattr(cap, 'isOpened') and cap.isOpened():
+                is_available = True
+                running = True
+                mode = "物理摄像头"
+            elif self.shared_camera is not None and getattr(self.shared_camera, 'running', False):
+                # 摄像头管理器在跑，但可能是模拟帧
+                is_available = True
+                running = True
+                mode = "模拟摄像头"
             return {
-                "available": True,
-                "running": True,
+                "available": is_available,
+                "running": running,
                 "frame_rate": self.frame_rate,
                 "quality": self.quality,
-                "mode": "静态图模式"
+                "mode": mode
             }
         except Exception as e:
             logger.error(f"获取状态失败: {e}")
@@ -79,7 +112,7 @@ class VideoStreamManager:
             }
     
     def generate_frames(self) -> Generator[bytes, None, None]:
-        """生成展示版视频帧：循环输出 static/home.jpg（若缺失则输出占位图）"""
+        """生成视频帧：静态图或共享摄像头"""
         self.is_streaming = True
         frame_interval = 1.0 / self.frame_rate
 
@@ -87,10 +120,19 @@ class VideoStreamManager:
             while self.is_streaming:
                 start_time = time.time()
 
-                frame_data: Optional[bytes] = self._static_image_bytes
-                if not frame_data:
-                    # 无静态图时，生成占位图
-                    frame_data = self._generate_test_frame()
+                if self.use_static:
+                    frame_data: Optional[bytes] = self._static_image_bytes
+                    if not frame_data:
+                        frame_data = self._generate_test_frame()
+                else:
+                    frame_data = None
+                    try:
+                        if self.shared_camera is not None:
+                            frame_data = self.shared_camera.read()
+                    except Exception as e:
+                        logger.debug(f"读取共享摄像头失败: {e}")
+                    if not frame_data:
+                        frame_data = self._generate_test_frame()
 
                 if frame_data:
                     # 生成multipart数据
@@ -114,6 +156,8 @@ class VideoStreamManager:
                 if sleep_time > 0:
                     time.sleep(sleep_time)
 
+        except GeneratorExit:
+            logger.info("视频流生成器关闭")
         except Exception as e:
             logger.error(f"视频流生成错误: {e}")
         finally:
@@ -156,7 +200,7 @@ video_manager = VideoStreamManager()
 @router.get("/video")
 async def video_stream():
     """
-    实时传输视频流（展示版：static/home.jpg）
+    实时传输视频流（静态图或摄像头，受 USE_STATIC_VIDEO_STREAM 控制）
     
     功能位置: Home.vue/Monitor.vue 视频区域
     优先级: 高 🔥
@@ -165,7 +209,7 @@ async def video_stream():
         StreamingResponse: MJPEG视频流
     """
     try:
-        logger.info("开始视频流传输（展示版：静态图）")
+        logger.info(f"开始视频流传输（{'静态图' if video_manager.use_static else '摄像头'}）")
         return StreamingResponse(
             video_manager.generate_frames(),
             media_type="multipart/x-mixed-replace; boundary=frame",
@@ -183,16 +227,17 @@ async def video_stream():
 @router.get("/video/fallback")
 async def video_fallback():
     """
-    视频流回退图片：直接返回 static/home.jpg；若缺失则返回最近缓存或占位图。
+    视频流回退图片：静态模式返回 static/home.jpg；否则返回最近缓存或占位图。
     前端在 <img> 加载 /api/video 失败时应切换到该URL。
     """
     try:
-        # 优先返回展示静态图
-        static_img = Path(__file__).resolve().parents[3] / 'static' / 'home.jpg'
-        if static_img.exists():
-            return FileResponse(str(static_img), media_type='image/jpeg', headers={"Cache-Control": "no-store"})
+        # 静态模式：优先返回静态图
+        if video_manager.use_static:
+            static_img = Path(__file__).resolve().parents[3] / 'static' / 'home.jpg'
+            if static_img.exists():
+                return FileResponse(str(static_img), media_type='image/jpeg', headers={"Cache-Control": "no-store"})
 
-        # 其次，返回最近缓存的快照
+        # 其次（或非静态模式），返回最近缓存的快照
         cache_dir = video_manager._cache_dir or (Path(__file__).resolve().parents[3] / 'static' / 'camera_cache')
         latest = cache_dir / 'latest.jpg'
         if latest.exists():

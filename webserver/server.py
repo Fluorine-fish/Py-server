@@ -466,7 +466,12 @@ class WebServer:
                                 "message": str(e)
                             }, websocket)
                 except Exception as e:
-                    print(f"[WebSocket] 错误: {str(e)}")
+                    # 在服务关闭/客户端断开时可能触发CancelledError或连接关闭，减少噪声
+                    import asyncio
+                    if isinstance(e, asyncio.CancelledError):
+                        pass
+                    else:
+                        print(f"[WebSocket] 错误: {str(e)}")
                 finally:
                     ws_manager.disconnect(websocket)
 
@@ -559,6 +564,11 @@ class WebServer:
                 if task:
                     try:
                         task.cancel()
+                        import asyncio
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
                     except Exception:
                         pass
         except Exception as e:
