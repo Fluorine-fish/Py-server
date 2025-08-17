@@ -295,6 +295,17 @@ export default {
     }
   },
   methods: {
+    // 统一的同源API地址拼接，避免编译期写死 http://localhost:5100
+    _apiUrl(path, params) {
+      const url = new URL(path, window.location.origin);
+      if (params && typeof params === 'object') {
+        Object.entries(params).forEach(([k, v]) => {
+          if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+        });
+      }
+      // 返回相对路径，确保同源部署下不受域名/端口变化影响
+      return url.pathname + (url.search ? url.search : '');
+    },
     initRealtime() {
       const url = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/realtime`;
       const ws = new WebSocket(url);
@@ -326,21 +337,19 @@ export default {
     },
     setupVideoMonitoring() {
       // 使用实际的视频流API
-      const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
-      this.videoSource = `${baseUrl}/api/video?t=${Date.now()}`;
+  this.videoSource = this._apiUrl('/api/video', { t: Date.now() });
       this.isVideoLoading = false;
     },
     refreshVideoStream() {
       this.isVideoLoading = true;
       
       // 先获取摄像头状态
-      const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
-      fetch(`${baseUrl}/api/video/status`)
+  fetch(this._apiUrl('/api/video/status'))
         .then(response => response.json())
         .then(data => {
           if (data.available) {
             // 摄像头可用（物理或模拟），显示视频流
-            this.videoSource = `${baseUrl}/api/video?t=${Date.now()}`;
+    this.videoSource = this._apiUrl('/api/video', { t: Date.now() });
             
             // 更新网络状态
             if (data.mode === "模拟摄像头") {
@@ -385,8 +394,7 @@ export default {
       }
       
       // 添加分辨率参数到视频URL
-      const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
-      this.videoSource = `${baseUrl}/api/video?resolution=${resolution}&t=${Date.now()}`;
+  this.videoSource = this._apiUrl('/api/video', { resolution, t: Date.now() });
       
       setTimeout(() => {
         this.isVideoLoading = false;
@@ -417,8 +425,7 @@ export default {
     },
     handleVideoError() {
   // 第一步：回退到后端提供的快照
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
-  this.videoSource = `${baseUrl}/api/video/fallback?t=${Date.now()}`;
+  this.videoSource = this._apiUrl('/api/video/fallback', { t: Date.now() });
       
       this.isVideoLoading = false;
       this.networkStatus = {

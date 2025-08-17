@@ -5,9 +5,9 @@
       <div class="main-content-card">
         <div class="mobile-card">
           <div class="mobile-card-header green-gradient">
-            <div class="mobile-card-title main-title-large">瞳灵智能台灯-家长呵护端</div>
-            <div class="refresh-button" @click="refreshData">
-              <i class="bi bi-arrow-clockwise"></i>
+            <div class="home-title">
+              <div class="title-main">瞳灵智能台灯</div>
+              <div class="title-sub">家长呵护端</div>
             </div>
           </div>
           <div class="mobile-card-content">
@@ -147,20 +147,31 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+@import url('https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=Noto+Serif+SC:wght@600;700&display=swap');
 
-
-.refresh-button {
-  cursor: pointer;
-  width: 28px;
-  height: 28px;
+/* 首页双行标题样式 */
+.home-title {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--gradient-light);
-  color: #1B4332;
-  box-shadow: 0 2px 6px rgba(27, 67, 50, 0.15);
-  border: 1px solid rgba(230, 242, 237, 0.8);
+  flex-direction: column;
+  width: 100%;
+  line-height: 1.2;
+}
+
+.title-main {
+  font-size: 34px; /* 更大 */
+  font-weight: 800;
+  color: #fff;
+  text-align: left; /* 靠左对齐 */
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  font-family: 'ZCOOL XiaoWei', 'Noto Serif SC', 'STKaiti', 'KaiTi', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', serif;
+}
+
+.title-sub {
+  font-size: 22px; /* 不小于页标题 */
+  font-weight: 700;
+  color: #fff;
+  text-align: right; /* 靠右对齐 */
+  opacity: 0.95;
 }
 
 .empty-state {

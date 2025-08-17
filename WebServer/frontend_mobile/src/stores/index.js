@@ -32,6 +32,8 @@ export const useDeviceStore = defineStore('device', {
       try {
         this.deviceInfo = await deviceApi.getDeviceInfo();
       } catch (error) {
+        if (error && (error.__canceled__ || error?.code === 'ERR_CANCELED')) return;
+        if (error && error.__timeout__) return;
         this.error = '获取设备信息失败';
         console.error(error);
       } finally {
@@ -46,6 +48,7 @@ export const useDeviceStore = defineStore('device', {
       try {
         this.deviceStatus = await deviceApi.getDeviceStatus();
       } catch (error) {
+        if (error && (error.__canceled__ || error?.code === 'ERR_CANCELED' || error.__timeout__)) return;
         // 模拟数据，实际应用中移除
         this.deviceStatus = {
           online: true,
@@ -68,6 +71,7 @@ export const useDeviceStore = defineStore('device', {
       try {
         this.deviceSettings = await deviceApi.getDeviceSettings();
       } catch (error) {
+        if (error && (error.__canceled__ || error?.code === 'ERR_CANCELED' || error.__timeout__)) return;
         // 模拟数据，实际应用中移除
         this.deviceSettings = {
           brightness: 70,
@@ -90,6 +94,7 @@ export const useDeviceStore = defineStore('device', {
         await deviceApi.updateDeviceSettings(settings);
         this.deviceSettings = { ...this.deviceSettings, ...settings };
       } catch (error) {
+        if (error && (error.__canceled__ || error?.code === 'ERR_CANCELED' || error.__timeout__)) return;
         this.error = '更新设备设置失败';
         console.error(error);
       } finally {
@@ -177,6 +182,7 @@ export const useMonitorStore = defineStore('monitor', {
       try {
         this.postureData = await monitorApi.getPostureData();
       } catch (error) {
+        if (error && (error.__canceled__ || error?.code === 'ERR_CANCELED' || error.__timeout__)) return;
         // 模拟数据，实际应用中移除
         this.postureData = {
           currentScore: 85,
@@ -208,6 +214,7 @@ export const useMonitorStore = defineStore('monitor', {
         this.postureHistory[timeRange] = data;
         return data;
       } catch (error) {
+        if (error && (error.__canceled__ || error?.code === 'ERR_CANCELED' || error.__timeout__)) return;
         // 模拟数据
         const mockData = {
           day: {
@@ -255,6 +262,7 @@ export const useMonitorStore = defineStore('monitor', {
         this.postureData.timeDistribution = data;
         return data;
       } catch (error) {
+        if (error && (error.__canceled__ || error?.code === 'ERR_CANCELED' || error.__timeout__)) return;
         // 模拟数据
         const mockData = {
           day: [2, 1, 0, 3, 4, 2, 1, 0, 5, 3, 1, 0],
@@ -287,6 +295,7 @@ export const useMonitorStore = defineStore('monitor', {
         
         return data;
       } catch (error) {
+        if (error && (error.__canceled__ || error?.code === 'ERR_CANCELED' || error.__timeout__)) return [];
         // 模拟图像数据
         const mockImages = Array.from({ length: limit }, (_, i) => ({
           id: `img_${page}_${i}`,
@@ -315,6 +324,7 @@ export const useMonitorStore = defineStore('monitor', {
         this.postureData.improvement = data;
         return data;
       } catch (error) {
+        if (error && (error.__canceled__ || error?.code === 'ERR_CANCELED' || error.__timeout__)) return;
         // 模拟数据
         const mockData = {
           problemTimeSlot: '下午3-5点',
@@ -334,6 +344,7 @@ export const useMonitorStore = defineStore('monitor', {
       try {
         this.eyeData = await monitorApi.getEyeData();
       } catch (error) {
+        if (error && (error.__canceled__ || error?.code === 'ERR_CANCELED' || error.__timeout__)) return;
         // 模拟数据，实际应用中移除
         this.eyeData = {
           eyeDistance: 45,
@@ -356,6 +367,7 @@ export const useMonitorStore = defineStore('monitor', {
       try {
         this.emotionData = await monitorApi.getEmotionData();
       } catch (error) {
+        if (error && (error.__canceled__ || error?.code === 'ERR_CANCELED' || error.__timeout__)) return;
         // 模拟数据，实际应用中移除
         this.emotionData = {
           currentEmotion: 'happy',

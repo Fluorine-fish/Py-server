@@ -1,4 +1,5 @@
- import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
+import { cancelAllRequests } from './api/index'
 
 // 导入页面组件
 import Home from './pages/Home.vue'
@@ -107,6 +108,8 @@ const router = createRouter({
 
 // 全局前置守卫，设置页面标题
 router.beforeEach((to, from, next) => {
+  // 路由切换前中止所有在途请求，避免快速切换导致页面卡死
+  cancelAllRequests('route-change');
   if (to.meta.title) {
     document.title = to.meta.title
   }

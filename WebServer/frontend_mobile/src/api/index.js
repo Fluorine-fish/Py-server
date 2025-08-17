@@ -1,10 +1,20 @@
 import axios from 'axios';
 
+// 全局请求控制：记录所有在途请求，支持路由切换时统一取消
+const inflightControllers = new Set();
+
+export function cancelAllRequests(reason = 'route-change') {
+  for (const ctrl of inflightControllers) {
+    try { ctrl.abort(new Error(reason)); } catch (_) {}
+  }
+  inflightControllers.clear();
+}
+
 // 创建axios实例
 export const api = axios.create({
   // 开发使用相对路径，让Vite代理处理
   baseURL: '/api',
-  timeout: 15000,
+  timeout: 12000,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -14,6 +24,13 @@ export const api = axios.create({
 api.interceptors.request.use(
   config => {
     // 这里可以添加认证信息等
+    // 为每个请求附加 AbortController，便于在页面切换时中止
+    const ctrl = new AbortController();
+    config.signal = config.signal || ctrl.signal;
+    // 记录 controller，便于统一取消
+    inflightControllers.add(ctrl);
+    // 保存到配置，响应阶段移除
+    config._abortController = ctrl;
     return config;
   },
   error => {
@@ -24,9 +41,28 @@ api.interceptors.request.use(
 // 响应拦截器
 api.interceptors.response.use(
   response => {
+    // 清理记录
+    if (response.config && response.config._abortController) {
+      inflightControllers.delete(response.config._abortController);
+    }
     return response.data;
   },
   error => {
+    // 清理记录
+    if (error.config && error.config._abortController) {
+      inflightControllers.delete(error.config._abortController);
+    }
+    // 对被取消/超时的请求进行静默处理，避免快速切换时页面卡死或充斥错误日志
+    const isAbort = error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError' || error?.message?.includes('aborted') || error?.config?.signal?.aborted;
+    const isTimeout = error?.code === 'ECONNABORTED' || /timeout/i.test(error?.message || '');
+    if (isAbort) {
+      // 返回带标记的错误，调用方可选择忽略
+      return Promise.reject(Object.assign(error, { __canceled__: true }));
+    }
+    if (isTimeout) {
+      console.warn('API超时:', error?.config?.url || '');
+      return Promise.reject(Object.assign(error, { __timeout__: true }));
+    }
     console.error('API错误:', error);
     return Promise.reject(error);
   }
