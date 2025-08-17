@@ -3,6 +3,7 @@
 """
 from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
+from pathlib import Path
 import time
 import asyncio
 import os
@@ -408,24 +409,31 @@ async def emotion_data():
         'history': history
     }
 
-# API路由 - 视频流
+# API路由 - 视频流（展示版：固定返回 static/home.jpg）
 @router.get('/video')
 async def video_stream():
-    """提供模拟视频流（静态图像）"""
-    placeholder_path = "../dgweb/static/mobile/placeholder.jpg"
-    if os.path.exists(placeholder_path):
-        with open(placeholder_path, "rb") as f:
-            image_bytes = f.read()
-    else:
-        # 如果找不到图片，返回空图像
-        image_bytes = b""
-    
-    async def generator():
-        while True:
-            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + image_bytes + b'\r\n')
-            await asyncio.sleep(0.1)
-    
-    return StreamingResponse(
-        generator(),
-        media_type='multipart/x-mixed-replace; boundary=frame'
-    )
+    """提供模拟视频流（静态图像：static/home.jpg）"""
+    try:
+        root_dir = Path(__file__).resolve().parents[3]
+        img_path = root_dir / 'static' / 'home.jpg'
+        if img_path.exists():
+            image_bytes = img_path.read_bytes()
+        else:
+            image_bytes = b""
+
+        async def generator():
+            while True:
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + image_bytes + b'\r\n')
+                await asyncio.sleep(0.1)
+
+        return StreamingResponse(
+            generator(),
+            media_type='multipart/x-mixed-replace; boundary=frame'
+        )
+    except Exception:
+        # 失败时也返回空流，避免前端报错
+        async def generator():
+            while True:
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n')
+                await asyncio.sleep(0.1)
+        return StreamingResponse(generator(), media_type='multipart/x-mixed-replace; boundary=frame')

@@ -536,7 +536,7 @@ watch(activeTab, async (v, o) => {
 }
 
 .tool-text-unified {
-  font-size: 14px; /* 适中的字体大小 */
+  font-size: 16px; /* 放大按钮文字，与首页一致 */
   color: var(--color-text);
   font-weight: 600; /* 稍微减轻一点粗细 */
   text-align: left; /* 左对齐 */
@@ -757,7 +757,7 @@ watch(activeTab, async (v, o) => {
   }
   
   .tool-text-unified {
-    font-size: 12px; /* 响应式下的文字字体 */
+  font-size: 14px; /* 响应式下放大后的文字字体 */
     font-weight: 600; /* 保持适中粗细 */
     text-align: left;
     display: -webkit-box;

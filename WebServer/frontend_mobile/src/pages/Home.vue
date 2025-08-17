@@ -491,7 +491,7 @@ onMounted(async () => {
 }
 
 .tool-text-unified {
-  font-size: 14px; /* 适中的字体大小 */
+  font-size: 16px; /* 放大按钮文字 */
   color: var(--color-text);
   font-weight: 600; /* 稍微减轻一点粗细 */
   text-align: left; /* 左对齐 */
@@ -503,6 +503,49 @@ onMounted(async () => {
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-all; /* 强制换行 */
+}
+
+/* 将功能色放在通用按钮样式之后，确保生效（与坐姿页一致） */
+/* 不同功能按钮的背景色区分 */
+.tool-analysis {
+  background: linear-gradient(135deg, rgba(156, 39, 176, 0.05) 0%, rgba(156, 39, 176, 0.1) 100%);
+  border: 1px solid rgba(156, 39, 176, 0.2);
+}
+
+.tool-posture {
+  background: linear-gradient(135deg, rgba(52, 152, 219, 0.05) 0%, rgba(52, 152, 219, 0.1) 100%);
+  border: 1px solid rgba(52, 152, 219, 0.2);
+}
+
+.tool-eye {
+  background: linear-gradient(135deg, rgba(46, 204, 113, 0.05) 0%, rgba(46, 204, 113, 0.1) 100%);
+  border: 1px solid rgba(46, 204, 113, 0.2);
+}
+
+.tool-emotion {
+  background: linear-gradient(135deg, rgba(255, 193, 7, 0.05) 0%, rgba(255, 193, 7, 0.1) 100%);
+  border: 1px solid rgba(255, 193, 7, 0.2);
+}
+
+/* 对应的图标颜色 */
+.tool-analysis .tool-icon-unified {
+  background: rgba(156, 39, 176, 0.1) !important;
+  color: #9c27b0 !important;
+}
+
+.tool-posture .tool-icon-unified {
+  background: rgba(52, 152, 219, 0.1) !important;
+  color: #3498db !important;
+}
+
+.tool-eye .tool-icon-unified {
+  background: rgba(46, 204, 113, 0.1) !important;
+  color: #2ecc71 !important;
+}
+
+.tool-emotion .tool-icon-unified {
+  background: rgba(255, 193, 7, 0.1) !important;
+  color: #ffc107 !important;
 }
 
 /* 响应式优化 */
@@ -566,7 +609,7 @@ onMounted(async () => {
   }
   
   .tool-text-unified {
-    font-size: 12px; /* 响应式下的文字字体 */
+  font-size: 14px; /* 响应式下放大后的文字字体 */
     font-weight: 600; /* 保持适中粗细 */
     text-align: left;
     display: -webkit-box;
