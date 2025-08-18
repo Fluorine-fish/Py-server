@@ -1,6 +1,7 @@
 import sys
 import os
 import time
+import logging
 
 # 添加项目根目录到Python路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -17,6 +18,7 @@ from http import HTTPStatus
 import json
 from datetime import datetime
 from Audio.Snowboy import snowboydecoder
+from modules.Lampbot_manager import LampbotService, get_lampbot_instance
 
 # 在文件开头添加串口模块导入
 from serial_handler import SerialHandler
@@ -238,6 +240,15 @@ class ChatbotService:
     """语音助手服务，用于语音交互"""
 
     def __init__(self):
+        # 初始化默认日志器，避免 AttributeError
+        self.logger = logging.getLogger("ChatbotService")
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter("[%(asctime)s] %(levelname)s Chatbot: %(message)s")
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+        self.logger.setLevel(logging.INFO)
+
         try:
             with open("Audio/config.json", "r", encoding="utf-8") as config_file:
                 self.config = json.load(config_file)
@@ -254,16 +265,19 @@ class ChatbotService:
         base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         tools_path = os.path.join(base_path, "Audio/tools.json")
         
-        # 初始化串口处理器
-        try:
-            self.serial_handler = SerialHandler(baudrate=SERIAL_BAUDRATE)
-            self.serial_available = (self.serial_handler is not None and 
-                                   hasattr(self.serial_handler, 'initialized'))
-            print(f"串口通信初始化: {'成功' if self.serial_available else '失败'}")
-        except Exception as e:
-            print(f"串口通信初始化失败: {str(e)}")
-            self.serial_handler = None
-            self.serial_available = False
+        # # 初始化串口处理器
+        # try:
+        #     self.serial_handler = SerialHandler(baudrate=SERIAL_BAUDRATE)
+        #     self.serial_available = (self.serial_handler is not None and 
+        #                            hasattr(self.serial_handler, 'initialized'))
+        #     print(f"串口通信初始化: {'成功' if self.serial_available else '失败'}")
+        # except Exception as e:
+        #     print(f"串口通信初始化失败: {str(e)}")
+        #     self.serial_handler = None
+        #     self.serial_available = False
+        # 改用LampbotService来处理进行台灯控制
+
+        self.lampbot_instance = get_lampbot_instance()
         
         self.my_agent = Agent(
             instructions=self.instructions,
@@ -285,6 +299,11 @@ class ChatbotService:
     def initialize(self):
         """初始化语音助手"""
         print("语音助手初始化完成")
+        # 示例：安全使用 logger
+        try:
+            self.logger.info("语音助手初始化完成")
+        except Exception:
+            print("语音助手初始化完成")
         return True
 
     def send_message(self, message):
@@ -345,7 +364,6 @@ class ChatbotService:
         return self.my_agent.speak_text(text)
     
 
-
 # 全局变量用于存储聊天机器人实例
 _chatbot_instance = None
 
@@ -360,12 +378,10 @@ def get_chatbot_instance():
 def light_on():
     """打开灯光"""
     print("==>打开灯光<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
     try:
-        msg = "稍等我帮你开灯哦！"
-        chatbot.speak_text(msg)  # 朗读开灯提示
-        # 使用serial_module中的send_command方法
-        success = chatbot.serial_handler.send_command(0x14, [0] * 8)
+        if (not lampbot == None) and lampbot.avilable:
+            success = lampbot.light_on()
         if success:
             print("串口命令发送成功: 开灯")
             return "success"
@@ -379,12 +395,10 @@ def light_on():
 def light_off():
     """关闭灯光"""
     print("==>关闭灯光<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
     try:
-        msg = "稍等我帮你关灯哦！"
-        chatbot.speak_text(msg)  # 朗读关灯提示
-        # 使用serial_module中的send_command方法
-        success = chatbot.serial_handler.send_command(0x15, [0] * 8)
+        if (not lampbot == None) and lampbot.avilable:
+            success = lampbot.light_off()
         if success:
             print("串口命令发送成功: 关灯")
             return "success"
@@ -398,12 +412,10 @@ def light_off():
 def light_brighter():
     """调高灯光亮度"""
     print("==>调高灯光亮度<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
     try:
-        msg = "稍等我帮你调整一下哦！"
-        chatbot.speak_text(msg) 
-        # 使用serial_module中的send_command方法
-        success = chatbot.serial_handler.send_command(0x10, [0] * 8)
+        if(not lampbot == None) and lampbot.avilable:
+            success = lampbot.light_brighter()
         if success:
             print("串口命令发送成功: 调高灯光亮度")
             return "success"
@@ -417,12 +429,10 @@ def light_brighter():
 def light_dimmer():
     """调低灯光亮度"""
     print("==>调低灯光亮度<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
     try:
-        msg = "稍等我帮你调整一下哦！"
-        chatbot.speak_text(msg)
-        # 使用serial_module中的send_command方法
-        success = chatbot.serial_handler.send_command(0x11, [0] * 8)
+        if (not lampbot == None) and lampbot.avilable:
+            success = lampbot.light_dimmer()
         if success:
             print("串口命令发送成功: 调低灯光亮度")
             return "success"
@@ -436,11 +446,10 @@ def light_dimmer():
 def color_temperature_up():
     """提升光照色温"""
     print("==>提升光照色温<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
     try:
-        msg = "稍等我帮你调整一下哦！"
-        chatbot.speak_text(msg)
-        success = chatbot.serial_handler.send_command(0x12, [0] * 8)
+        if (not lampbot == None) and lampbot.avilable:
+            success = lampbot.color_temperature_up()
         if success:
             print("串口命令发送成功: 提升光照色温")
             return "success"
@@ -454,11 +463,10 @@ def color_temperature_up():
 def color_temperature_down():
     """降低光照色温"""
     print("==>降低光照色温<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
     try:
-        msg = "稍等我帮你调整一下哦！"
-        chatbot.speak_text(msg)
-        success = chatbot.serial_handler.send_command(0x13, [0] * 8)
+        if (not lampbot == None) and lampbot.avilable:
+            success = lampbot.color_temperature_down()
         if success:
             print("串口命令发送成功: 降低光照色温")
             return "success"
@@ -472,10 +480,10 @@ def color_temperature_down():
 def posture_reminder():
     """进行坐姿提醒"""
     print("==>进行坐姿提醒<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
     try:
-        # 使用serial_module中的send_command方法
-        success = chatbot.serial_handler.send_command(0x20, [0] * 8)
+        if ( not lampbot == None) and lampbot.avilable:
+            success = lampbot.posture_reminder()
         if success:
             print("串口命令发送成功: 坐姿提醒")
             return "success"
@@ -489,12 +497,10 @@ def posture_reminder():
 def reading_mode():
     """进行阅读模式"""
     print("==>进行阅读模式<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
     try:
-        msg = "稍等我帮你打开阅读模式哦！"
-        chatbot.speak_text(msg)
-        # 使用serial_module中的send_command方法
-        success = chatbot.serial_handler.send_command(0x50, [0] * 8)
+        if (not lampbot == None) and lampbot.avilable:
+            success = lampbot.reading_mode()
         if success:
             print("串口命令发送成功: 阅读模式")
             return "success"
@@ -508,12 +514,10 @@ def reading_mode():
 def learning_mode():
     """进行学习模式"""
     print("==>进行学习模式<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
     try:
-        msg = "稍等我帮你打开学习模式哦！"
-        chatbot.speak_text(msg)
-        # 使用serial_module中的send_command方法
-        success = chatbot.serial_handler.send_command(0x51, [0] * 8)
+        if (not lampbot == None) and lampbot.avilable:
+            success = lampbot.learning_mode()
         if success:
             print("串口命令发送成功: 进行学习模式")
             return "success"
@@ -527,12 +531,10 @@ def learning_mode():
 def vision_reminder():
     """进行远眺提醒"""
     print("==>进行远眺提醒<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
     try:
-        msg = "不如稍微休息一下，远眺一下哦！"
-        chatbot.speak_text(msg)
-        # 使用serial_module中的send_command方法
-        success = chatbot.serial_handler.send_command(0x21, [0] * 8)
+        if (not lampbot == None) and lampbot.avilable:
+            success = lampbot.vision_reminder()
         if success:
             print("串口命令发送成功: 远眺提醒")
             return "success"
@@ -546,55 +548,38 @@ def vision_reminder():
 def get_status():
     """获取台灯状态"""
     print("==>获取台灯状态<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
+    result = None
     try:
-        msg = "稍等我帮你看看哦！"
-        chatbot.speak_text(msg)  # 朗读获取状态提示
-        if chatbot.serial_handler:
-            data = chatbot.serial_handler.request_data(0x40,[1]*8)
-            if data is None:
-                print("无法从台灯获取状态数据")
-                return None
-            else:
-                if data['command'] == 0xBF:
-                    print("台灯未开机，不响应命令")
-                    return None
-                if data['datatype'] != 0xB0:
-                    print(f"未知数据类型: {data['datatype']}")
-                    return None
-                if data['command'] != 0x41:
-                    print(f"未知命令: {data['command']}")
-                    return None
-                # 确保lamp_status字典初始化
-                if not hasattr(chatbot, 'lamp_status'):
-                    chatbot.lamp_status = {}
-                if 'is_light' in data:
-                    chatbot.lamp_status['power'] = data['is_light']
+        if (lampbot is not None) and getattr(lampbot, 'avilable', False):
+            result = lampbot.update_status()
+        else:
+            print("Lampbot 服务不可用，无法获取状态")
+            return None
 
-                if 'brightness' in data:
-                    chatbot.lamp_status['brightness'] = data['brightness']
-                
-                if 'color_temp' in data:
-                    chatbot.lamp_status['color_temp'] = data['color_temp']
-
-                result = str(f"成功获取台灯状态: 电源={chatbot.lamp_status['power']}, 亮度={chatbot.lamp_status['brightness']}, 色温={chatbot.lamp_status['color_temp']}")
-
-                print(result)
-
-        chatbot.lamp_status['last_update'] = datetime.now().isoformat()
+        chatbot = get_chatbot_instance()
+        if hasattr(chatbot, 'lamp_status'):
+            chatbot.lamp_status['last_update'] = datetime.now().isoformat()
         return result
     except Exception as e:
-        chatbot.logger.error(f"获取台灯状态失败: {e}")
+        # 安全日志输出，避免 logger 不存在再次抛错
+        try:
+            chatbot = get_chatbot_instance()
+            if hasattr(chatbot, 'logger') and chatbot.logger:
+                chatbot.logger.error(f"获取台灯状态失败: {e}")
+            else:
+                print(f"获取台灯状态失败: {e}")
+        except Exception:
+            print(f"获取台灯状态失败: {e}")
         return None
 
 def arm_forward():
     """机械臂向前移动"""
     print("==>机械臂向前移动<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
     try:
-        msg = "稍等我帮你调整一下哦！"
-        chatbot.speak_text(msg)
-        success = chatbot.serial_handler.send_command(0x30, [0] * 8)
+        if (not lampbot == None) and lampbot.avilable:
+            success = lampbot.arm_forward()
         if success:
             print("串口命令发送成功: 机械臂向前移动")
             return "success"
@@ -608,11 +593,10 @@ def arm_forward():
 def arm_backward():
     """机械臂向后移动"""
     print("==>机械臂向后移动<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
     try:
-        msg = "稍等我帮你调整一下哦！"
-        chatbot.speak_text(msg)
-        success = chatbot.serial_handler.send_command(0x31, [0] * 8)
+        if (not lampbot == None) and lampbot.avilable:
+            success = lampbot.arm_backward()
         if success:
             print("串口命令发送成功: 机械臂向后移动")
             return "success"
@@ -626,11 +610,10 @@ def arm_backward():
 def arm_left():
     """机械臂左转"""
     print("==>机械臂左转<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
     try:
-        msg = "稍等我帮你调整一下哦！"
-        chatbot.speak_text(msg)
-        success = chatbot.serial_handler.send_command(0x32, [0] * 8)
+        if (not lampbot == None) and lampbot.avilable:
+            success = lampbot.arm_left()
         if success:
             print("串口命令发送成功: 机械臂左转")
             return "success"
@@ -644,11 +627,10 @@ def arm_left():
 def arm_right():
     """机械臂右转"""
     print("==>机械臂右转<==")
-    chatbot = get_chatbot_instance()
+    lampbot = get_lampbot_instance()
     try:
-        msg = "稍等我帮你调整一下哦！"
-        chatbot.speak_text(msg)
-        success = chatbot.serial_handler.send_command(0x33, [0] * 8)
+        if (not lampbot == None) and lampbot.avilable:
+            success = lampbot.arm_right()
         if success:
             print("串口命令发送成功: 机械臂右转")
             return "success"

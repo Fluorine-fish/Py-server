@@ -17,6 +17,7 @@ from modules.video_stream_module import VideoStreamHandler
 from modules.posture_module import WebPostureMonitor, PROCESS_WIDTH, PROCESS_HEIGHT
 from modules.serial_module import SerialCommunicationHandler
 from modules.chatbot_module import ChatbotService
+from modules.Lampbot_manager import LampbotService, get_lampbot_instance
 
 # 可选导入DetectionService
 try:
@@ -120,6 +121,39 @@ def create_services_context() -> AppContext:
         print("串口通信系统初始化成功")
     else:
         print("串口通信系统未启动，但其他系统可以正常工作")
+
+    # 初始化LampbotService
+    try:
+        print("正在初始化台灯管理服务...")
+        try:
+            lampbot_service = get_lampbot_instance()
+        except Exception as e:
+            print(f"获取台灯管理服务实例失败: {str(e)}")
+            lampbot_service = None
+
+        if not lampbot_service == None:
+            # 创建台灯自动更新线程
+            def lampbot_status_updater():
+                """在台灯处于空闲状态的时候，定期更新台灯状态"""
+                while True:
+                    lampbot_instance = get_lampbot_instance()
+                    if lampbot_instance is None:
+                        print("无法获取台灯管理服务实例，跳过状态更新")
+                        time.sleep(10)
+                        continue
+                    try:
+                        if lampbot_instance.avilable:
+                            lampbot_instance.update_status()
+                    except Exception as e:
+                        print(f"台灯状态更新出错: {str(e)}")
+                    time.sleep(5) 
+            
+            lampbot_thread = threading.Thread(target=lampbot_status_updater, daemon=True)
+            lampbot_thread.start()
+            print("台灯管理服务初始化成功")
+
+    except Exception as e:
+        print(f"台灯管理服务初始化失败: {str(e)}")
 
     # 初始化情绪检测服务 (替换原有的检测服务)
     emotion_detector = None

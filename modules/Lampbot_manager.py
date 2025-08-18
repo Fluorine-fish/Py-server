@@ -14,10 +14,16 @@ from datetime import datetime
 from serial_handler import SerialHandler
 from config import (SERIAL_BAUDRATE)
 
-# 取消原先的后台线程/进程心跳机制，改由业务层在对话循环中定期调用 update_status
+_lampbot_instance = None
 
-class Lampbot_Instance:
-    def __init__(self):
+def get_lampbot_instance():
+    global _lampbot_instance
+    if _lampbot_instance is None:
+        _lampbot_instance = LampbotService()
+    return _lampbot_instance
+
+class LampbotService:
+    def __init__(self, *args, **kwargs):
         # 初始化路径
         current_dir = os.path.dirname(os.path.abspath(__file__))
         parent_dir = os.path.dirname(current_dir)
@@ -38,9 +44,6 @@ class Lampbot_Instance:
             self.serial_handler = None
             self.serial_available = False
 
-        # 线程锁，确保串口访问互斥
-        self._serial_lock = threading.Lock()
-
         # 台灯状态
         self.lamp_status = {
             'power': True,
@@ -49,29 +52,33 @@ class Lampbot_Instance:
             'last_update': datetime.now().isoformat()
         }
 
-    # 移除后台进程与监听线程，由上层业务循环定期触发 update_status
+        self.avilable = True # 用于标记全局实例当前是否没有执行任务，避免多线程出现冲突
+        self._serial_lock = threading.RLock()  # 确保始终存在
+        # 如果有 available/avilable 命名不一致，也做个兼容
+        if not hasattr(self, 'available') and hasattr(self, 'avilable'):
+            self.available = self.avilable
+        if not hasattr(self, 'avilable') and hasattr(self, 'available'):
+            self.avilable = self.available
 
-    # 取消后台监听逻辑，状态刷新由业务层主动调用
+    def _safe_send_command(self, command, data_array=None):
+        """带串口锁的安全发送命令，返回布尔表示是否发送成功"""
+        if data_array is None:
+            data_array = [0] * 7  # pack_frame 最多7个uint32
 
-    # 安全发送串口命令
-    def _safe_send_command(self, cmd: int, payload):
-        if not self.serial_handler:
-            print("串口未初始化")
+        if not getattr(self, 'serial_handler', None) or not getattr(self, 'serial_available', False):
+            print("串口不可用，无法发送命令")
             return False
-        with self._serial_lock:
-            return self.serial_handler.send_command(cmd, payload)
 
-    def close(self, timeout: float = 2.0):
-        # 无后台线程/进程，无需特殊关闭
-        return
-
-    def __del__(self):
         try:
-            self.close()
-        except Exception:
-            pass
+            with self._serial_lock:
+                return bool(self.serial_handler.send_command(command, data_array))
+        except Exception as e:
+            print(f"发送命令 0x{command:02X} 出错: {e}")
+            return False
 
     def update_status(self):
+        self.avilable = False
+
         result = None
         if self.serial_handler:
             with self._serial_lock:
@@ -105,132 +112,219 @@ class Lampbot_Instance:
                 print(result)
 
         self.lamp_status['last_update'] = datetime.now().isoformat()
+
+        self.avilable = True
         return result
 
     def light_on(self):
+        self.avilable = False
+
         res = self._safe_send_command(0x14, [0] * 8)
         if res:
             print("串口命令发送成功: 开灯")
             self.lamp_status['power'] = True
+
+            self.avilable = True
             return "success"
         else:
             print("串口命令发送失败: 开灯")
+
+            self.avilable = True
             return "串口命令发送失败，未执行开灯操作"
+        
 
     def light_off(self):
+        self.avilable = False
+
         res = self._safe_send_command(0x15, [1] * 8)
         if res:
             print("串口命令发送成功: 关灯")
             self.lamp_status['power'] = False
+
+            self.avilable = True
             return "success"
         else:
             print("串口命令发送失败: 关灯")
+
+            self.avilable = True
             return "串口命令发送失败，未执行开灯操作"
 
     def light_brighter(self):
+        self.avilable = False
+
         success = self._safe_send_command(0x10, [0] * 8)
         if success:
             print("串口命令发送成功: 调高灯光亮度")
+
+            self.avilable = True
             return "success"
         else:
             print("串口命令发送失败: 调高灯光亮度")
+
+            self.avilable = True
             return "串口命令发送失败，未执行调高灯光亮度操作"
         
     def light_dimmer(self):
+        self.avilable = False
+
         success = self._safe_send_command(0x11, [0] * 8)
         if success:
             print("串口命令发送成功: 调低灯光亮度")
+
+            self.avilable = True
             return "success"
         else:
             print("串口命令发送失败: 调低灯光亮度")
+
+            self.avilable = True
             return "串口命令发送失败，未执行调低灯光亮度操作"     
 
     def color_temperature_up(self):
+        self.avilable = False
+
         success = self._safe_send_command(0x12, [0] * 8)
         if success:
             print("串口命令发送成功: 提升光照色温")
+
+            self.avilable = True
             return "success"
         else:
             print("串口命令发送失败: 提升光照色温")
+
+            self.avilable = True
             return "串口命令发送失败，未执行提升光照色温操作"
         
     def color_temperature_down(self):
+        self.avilable = False
+
         success = self._safe_send_command(0x13, [0] * 8)
         if success:
             print("串口命令发送成功: 降低光照色温")
+
+            self.avilable = True
             return "success"
         else:
             print("串口命令发送失败: 降低光照色温")
+
+            self.avilable = True
             return "串口命令发送失败，未执行降低光照色温操作"  
             
     def posture_reminder(self):
+        self.avilable = False
+
         success = self._safe_send_command(0x20, [0] * 8)
         if success:
             print("串口命令发送成功: 坐姿提醒")
+
+            self.avilable = True
             return "success"
         else:
             print("串口命令发送失败: 坐姿提醒")
+
+            self.avilable = True
             return "串口命令发送失败，未执行坐姿提醒操作"      
 
     def reading_mode(self):
+        self.avilable = False
+
         success = self._safe_send_command(0x50, [0] * 8)
         if success:
             print("串口命令发送成功: 阅读模式")
+
+            self.avilable = True
             return "success"
         else:
             print("串口命令发送失败: 阅读模式")
+
+            self.avilable = True
             return "串口命令发送失败，未执行阅读模式操作"
 
     def learning_mode(self):
+        self.avilable = False
+
         success = self._safe_send_command(0x51, [0] * 8)
         if success:
             print("串口命令发送成功: 进行学习模式")
+
+            self.avilable = True
             return "success"
         else:
             print("串口命令发送失败: 进行学习模式")
+
+            self.avilable = True
             return "串口命令发送失败，未执行进行学习模式操作"
 
     def vision_reminder(self):
+        self.avilable = False
+
         success = self._safe_send_command(0x21, [0] * 8)
         if success:
             print("串口命令发送成功: 远眺提醒")
+
+            self.avilable = True
             return "success"
         else:
             print("串口命令发送失败: 远眺提醒")
+
+            self.avilable = True
             return "串口命令发送失败，未执行远眺提醒操作"
         
     def arm_forward(self):
+        self.avilable = False
+
         success = self._safe_send_command(0x30, [0] * 8)
         if success:
             print("串口命令发送成功: 机械臂向前移动")
+
+            self.avilable = True
             return "success"
         else:
             print("串口命令发送失败: 机械臂向前移动")
+
+            self.avilable = True
             return "串口命令发送失败，未执行机械臂向前移动操作"
     
     def arm_backward(self):
+        self.avilable = False
+
         success = self._safe_send_command(0x31, [0] * 8)
         if success:
             print("串口命令发送成功: 机械臂向后移动")
+
+            self.avilable = True
             return "success"
         else:
             print("串口命令发送失败: 机械臂向后移动")
+
+            self.avilable = True
             return "串口命令发送失败，未执行机械臂向后移动操作"
 
     def arm_right(self):
+        self.avilable = False
+
         success = self._safe_send_command(0x33, [0] * 8)
         if success:
             print("串口命令发送成功: 机械臂右转")
+
+            self.avilable = True
             return "success"
         else:
             print("串口命令发送失败: 机械臂右转")
+
+            self.avilable = True
             return "串口命令发送失败，未执行机械臂右转操作"        
         
     def arm_left(self):
+        self.avilable = False
+
         success = self._safe_send_command(0x32, [0] * 8)
         if success:
             print("串口命令发送成功: 机械臂左转")
+
+            self.avilable = True
             return "success"
         else:
             print("串口命令发送失败: 机械臂左转")
+
+            self.avilable = True
             return "串口命令发送失败，未执行机械臂左转操作"
