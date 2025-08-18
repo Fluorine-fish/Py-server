@@ -1,9 +1,5 @@
 import os,sys,time
-import multiprocessing as mp
-from multiprocessing.synchronize import Event as MpEvent
-from multiprocessing.queues import Queue as MpQueue
 import threading
-from queue import Empty
 
 # 添加项目根目录到Python路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -18,16 +14,7 @@ from datetime import datetime
 from serial_handler import SerialHandler
 from config import (SERIAL_BAUDRATE)
 
-# 在模块顶层新增：进程里的 tick 循环（只发信号，不直接操作串口）
-def _tick_loop(stop_event: MpEvent, q: MpQueue, interval_sec: int = 10):
-    import time as _t
-    while not stop_event.is_set():
-        try:
-            # 非阻塞推送一个心跳，队列满就跳过，避免堆积
-            q.put_nowait(_t.time())
-        except Exception:
-            pass
-        stop_event.wait(interval_sec)
+# 取消原先的后台线程/进程心跳机制，改由业务层在对话循环中定期调用 update_status
 
 class Lampbot_Instance:
     def __init__(self):
@@ -62,32 +49,9 @@ class Lampbot_Instance:
             'last_update': datetime.now().isoformat()
         }
 
-        # 启动“进程 + 监听线程”
-        self._stop_event = mp.Event()
-        self._tick_q = mp.Queue(maxsize=8)
-        self._tick_proc = mp.Process(
-            target=_tick_loop,
-            args=(self._stop_event, self._tick_q, 10),  # 每10秒
-            daemon=True
-        )
-        self._tick_proc.start()
+    # 移除后台进程与监听线程，由上层业务循环定期触发 update_status
 
-        self._listener_thread = threading.Thread(
-            target=self._listen_ticks, daemon=True
-        )
-        self._listener_thread.start()
-
-    # 监听子进程心跳并触发更新（仍在主进程，安全访问串口）
-    def _listen_ticks(self):
-        while not self._stop_event.is_set():
-            try:
-                _ = self._tick_q.get(timeout=1.0)
-            except Empty:
-                continue
-            try:
-                self.update_status()
-            except Exception as e:
-                print(f"后台更新失败: {e}")
+    # 取消后台监听逻辑，状态刷新由业务层主动调用
 
     # 安全发送串口命令
     def _safe_send_command(self, cmd: int, payload):
@@ -98,28 +62,8 @@ class Lampbot_Instance:
             return self.serial_handler.send_command(cmd, payload)
 
     def close(self, timeout: float = 2.0):
-        # 优雅关闭进程与线程
-        try:
-            self._stop_event.set()
-        except Exception:
-            pass
-        try:
-            if hasattr(self, '_tick_proc') and self._tick_proc.is_alive():
-                self._tick_proc.join(timeout)
-                if self._tick_proc.is_alive():
-                    self._tick_proc.kill()
-        except Exception:
-            pass
-        try:
-            if hasattr(self, '_listener_thread') and self._listener_thread.is_alive():
-                self._listener_thread.join(timeout)
-        except Exception:
-            pass
-        try:
-            if hasattr(self, '_tick_q'):
-                self._tick_q.close()
-        except Exception:
-            pass
+        # 无后台线程/进程，无需特殊关闭
+        return
 
     def __del__(self):
         try:
