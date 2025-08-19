@@ -9,6 +9,7 @@ from user_agents import parse as parse_ua
 # 导入新的路由模块（替代旧的Flask时期路由）
 from routers.video_stream import router as video_router
 from routers.realtime_data import router as realtime_router
+from routers.lamp_control import router as lamp_router
 
 # 创建基础FastAPI应用
 app = FastAPI()
@@ -52,21 +53,21 @@ async def root(request: Request):
 # PC端静态文件 - 完整版
 app.mount(
     "/pc", 
-    StaticFiles(directory="../frontend_pc/dist", html=True),
+    StaticFiles(directory="../frontend_pc/dist", html=True, check_dir=False),
     name="pc_static"
 )
 
 # 为PC端的assets文件单独创建挂载点
 app.mount(
     "/assets",
-    StaticFiles(directory="../frontend_pc/dist/assets"),
+    StaticFiles(directory="../frontend_pc/dist/assets", check_dir=False),
     name="pc_assets"
 )
 
 # 移动端静态资源 - 只挂载assets目录
 app.mount(
     "/mobile/assets",
-    StaticFiles(directory="../frontend_mobile/dist/assets"),
+    StaticFiles(directory="../frontend_mobile/dist/assets", check_dir=False),
     name="mobile_assets"
 )
 
@@ -100,6 +101,7 @@ async def device_info(request: Request):
 # 包含新的API路由（替代旧的Flask时期路由）
 app.include_router(video_router, tags=["视频流"])
 app.include_router(realtime_router, tags=["实时数据"])
+app.include_router(lamp_router, tags=["台灯控制"])  # 提供 /api/lamp 路由
 
 # SPA前端路由处理 - 捕获所有PC端路由并重定向到index.html
 @app.get('/pc/{path:path}', include_in_schema=False)

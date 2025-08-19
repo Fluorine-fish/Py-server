@@ -4,7 +4,7 @@
 包括设备状态、坐姿检测、用眼监测、情绪检测数据
 """
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Body
 from datetime import datetime, timezone, date, time as dt_time
 from pydantic import BaseModel, Field
 import json
@@ -12,6 +12,7 @@ import logging
 import sys
 import os
 from typing import Dict, Any, Optional
+import asyncio
 
 # 添加项目路径以导入现有模块
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -22,6 +23,10 @@ except Exception:
     get_posture_stats = None  # type: ignore
 from pathlib import Path
 from typing import Optional
+try:
+    from modules.Lampbot_manager import get_lampbot_instance
+except Exception:
+    get_lampbot_instance = None  # type: ignore
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -50,7 +55,7 @@ class LightBrightnessRequest(BaseModel):
     brightness: int = Field(..., ge=0, le=100)
 
 class LightColorRequest(BaseModel):
-    colorTemperature: int = Field(..., ge=2700, le=6500)
+    colorTemperature: int = Field(..., ge=3500, le=6000)
 
 class LightPowerRequest(BaseModel):
     power: bool
@@ -76,7 +81,7 @@ class RealTimeDataManager:
         # 设备设置（内存态）
         self.device_settings = {
             "brightness": 70,
-            "colorTemperature": 5500,
+            "colorTemperature": 5300,
             "autoAdjust": True,
             "power": True
         }
@@ -1043,32 +1048,139 @@ async def get_guardian_report():
 # 设备控制与设置
 # -------------------------------
 
+def _get_lamp_service():
+    if get_lampbot_instance is None:
+        raise HTTPException(status_code=500, detail="Lamp 服务未就绪")
+    svc = get_lampbot_instance()
+    if svc is None:
+        raise HTTPException(status_code=503, detail="Lamp 服务不可用")
+    return svc
+
 @router.post("/control/light/brightness")
 async def set_light_brightness(body: LightBrightnessRequest):
+    svc = _get_lamp_service()
+    target_pct = int(body.brightness)
     try:
-        realtime_data_manager.device_settings["brightness"] = body.brightness
-        return {"success": True, "message": "亮度调整成功", "currentBrightness": body.brightness}
+        await asyncio.to_thread(svc.update_status)
+        cur_units = int(svc.lamp_status.get('brightness', 500) or 500)
+        cur_power = bool(svc.lamp_status.get('power', True))
+
+        # 目标为0，直接关灯
+        if target_pct <= 0:
+            await asyncio.to_thread(svc.light_off)
+            try:
+                await asyncio.wait_for(asyncio.to_thread(svc.update_status), timeout=1.2)
+            except Exception:
+                pass
+            realtime_data_manager.device_settings["brightness"] = 0
+            realtime_data_manager.device_settings["power"] = False
+            return {"success": True, "message": "已关灯", "status": svc.lamp_status}
+
+        # 目标>0且当前为关灯 -> 先开灯
+        if not cur_power:
+            await asyncio.to_thread(svc.light_on)
+            await asyncio.sleep(0.08)
+            await asyncio.to_thread(svc.update_status)
+            cur_units = int(svc.lamp_status.get('brightness', cur_units) or cur_units)
+        target_units = max(0, min(1000, target_pct * 10))
+        STEP = 200  # 硬件每步±200
+        delta = target_units - cur_units
+        # 半步阈值，避免在两档之间反复横跳
+        if abs(delta) <= STEP // 2:
+            # 差距不到半步，不动作
+            pass
+        else:
+            # 计算需要移动的步数（四舍五入到最近的步）
+            steps_to_move = int(round(delta / STEP))
+            # 限制单次最多移动5步，避免长时间占用
+            steps_to_move = max(-5, min(5, steps_to_move))
+            SLEEP = 0.06
+            for _ in range(abs(steps_to_move)):
+                if steps_to_move > 0:
+                    await asyncio.to_thread(svc.light_brighter)
+                else:
+                    await asyncio.to_thread(svc.light_dimmer)
+                await asyncio.sleep(SLEEP)
+        # 刷新一次状态
+        await asyncio.to_thread(svc.update_status)
+        # 同步到内存设置（尽量取接近的百分比）
+        try:
+            realtime_data_manager.device_settings["brightness"] = int((svc.lamp_status.get('brightness', 0) or 0) / 10)
+        except Exception:
+            realtime_data_manager.device_settings["brightness"] = target_pct
+        return {"success": True, "message": "亮度调整成功", "status": svc.lamp_status}
     except Exception as e:
         logger.error(f"设置亮度失败: {e}")
-        raise HTTPException(status_code=500, detail="设置亮度失败")
+        raise HTTPException(status_code=500, detail=f"设置亮度失败: {e}")
 
 @router.post("/control/light/color")
-async def set_light_color(body: LightColorRequest):
+async def set_light_color(body: dict = Body(...)):
+    svc = _get_lamp_service()
     try:
-        realtime_data_manager.device_settings["colorTemperature"] = body.colorTemperature
-        return {"success": True, "message": "色温调整成功", "currentTemperature": body.colorTemperature}
+        target_k = None
+        if isinstance(body, dict):
+            if 'colorTemperature' in body:
+                target_k = int(body['colorTemperature'])
+            elif 'temperature' in body:
+                target_k = int(body['temperature'])
+            elif 'color' in body and isinstance(body['color'], dict):
+                c = body['color']
+                if 'temperature' in c:
+                    target_k = int(c['temperature'])
+                elif 'colorTemperature' in c:
+                    target_k = int(c['colorTemperature'])
+        if target_k is None:
+            raise HTTPException(status_code=400, detail="缺少色温字段")
+        if target_k < 3500 or target_k > 6000:
+            raise HTTPException(status_code=400, detail="色温需在3500-6000K之间")
+
+        await asyncio.to_thread(svc.update_status)
+        cur_k = int(svc.lamp_status.get('color_temp', 5300) or 5300)
+        STEP = 800
+        delta = target_k - cur_k
+        # 半步阈值 400K 内不动作，避免抖动
+        if abs(delta) <= STEP // 2:
+            pass
+        else:
+            steps_to_move = int(round(delta / STEP))
+            steps_to_move = max(-3, min(3, steps_to_move))
+            SLEEP = 0.06
+            for _ in range(abs(steps_to_move)):
+                if steps_to_move > 0:
+                    await asyncio.to_thread(svc.color_temperature_up)
+                else:
+                    await asyncio.to_thread(svc.color_temperature_down)
+                await asyncio.sleep(SLEEP)
+        await asyncio.to_thread(svc.update_status)
+        try:
+            realtime_data_manager.device_settings["colorTemperature"] = int(svc.lamp_status.get('color_temp', target_k) or target_k)
+        except Exception:
+            realtime_data_manager.device_settings["colorTemperature"] = target_k
+        return {"success": True, "message": "色温调整成功", "status": svc.lamp_status}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"设置色温失败: {e}")
-        raise HTTPException(status_code=500, detail="设置色温失败")
+        raise HTTPException(status_code=500, detail=f"设置色温失败: {e}")
 
 @router.post("/control/light/power")
 async def set_light_power(body: LightPowerRequest):
+    svc = _get_lamp_service()
     try:
-        realtime_data_manager.device_settings["power"] = body.power
-        return {"success": True, "message": "灯光已开启" if body.power else "灯光已关闭", "powerState": body.power}
+        if body.power:
+            res = await asyncio.to_thread(svc.light_on)
+        else:
+            res = await asyncio.to_thread(svc.light_off)
+        ok = (res == "success")
+        try:
+            await asyncio.wait_for(asyncio.to_thread(svc.update_status), timeout=1.2)
+        except Exception:
+            pass
+        realtime_data_manager.device_settings["power"] = bool(body.power)
+        return {"success": ok, "message": "灯光已开启" if body.power else "灯光已关闭", "status": getattr(svc, 'lamp_status', {})}
     except Exception as e:
         logger.error(f"设置电源失败: {e}")
-        raise HTTPException(status_code=500, detail="设置电源失败")
+        raise HTTPException(status_code=500, detail=f"设置电源失败: {e}")
 
 @router.get("/device/settings")
 async def get_device_settings():

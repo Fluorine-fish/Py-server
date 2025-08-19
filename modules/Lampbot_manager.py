@@ -118,7 +118,7 @@ class Lampbot_Instance:
             return "串口命令发送失败，未执行开灯操作"
 
     def light_off(self):
-        res = self._safe_send_command(0x15, [1] * 8)
+        res = self._safe_send_command(0x15, [0] * 8)
         if res:
             print("串口命令发送成功: 关灯")
             self.lamp_status['power'] = False
@@ -234,3 +234,15 @@ class Lampbot_Instance:
         else:
             print("串口命令发送失败: 机械臂左转")
             return "串口命令发送失败，未执行机械臂左转操作"
+
+# ---- 全局单例访问器 ----
+_lampbot_singleton = None
+
+def get_lampbot_instance():
+    """获取 Lampbot 全局单例实例。
+    若不存在则创建，供 Web 接口与其他模块复用。
+    """
+    global _lampbot_singleton
+    if _lampbot_singleton is None:
+        _lampbot_singleton = Lampbot_Instance()
+    return _lampbot_singleton

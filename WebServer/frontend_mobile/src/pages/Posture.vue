@@ -97,14 +97,22 @@
         </div>
         <div class="mobile-card-content">
           <!-- 时间占比 饼图 -->
+          <div class="mobile-card-header">
+            <div class="mobile-card-title"> 📊 坐姿时间占比 </div>
+          </div>
           <div v-show="activeTab==='analysis'">
             <div class="chart-container-styled pie-wrap">
-              <canvas ref="pieCanvas"></canvas>
-            </div>
-            <div class="pie-legend">
-              <span><i class="legend-dot dot-good"></i>良好 {{ pieDataHours.good.toFixed(1) }}h</span>
-              <span><i class="legend-dot dot-mild"></i>轻度不良 {{ pieDataHours.mild.toFixed(1) }}h</span>
-              <span><i class="legend-dot dot-bad"></i>不良 {{ pieDataHours.bad.toFixed(1) }}h</span>
+              <div class="pie-canvas-area">
+                <canvas ref="pieCanvas"></canvas>
+              </div>
+              <!-- 自定义图例（与家长端样式一致）：彩色圆点 + 文案 + 时长 -->
+              <div class="legend-grid pie-legend-grid" v-if="legendData.length">
+                <div class="legend-item" v-for="item in legendData" :key="item.key">
+                  <span class="legend-dot" :class="'legend-' + item.key"></span>
+                  <span class="legend-text">{{ item.label }}</span>
+                  <span class="legend-value">{{ item.value }}h</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -245,7 +253,8 @@ const buildPieDataset = () => {
     labels: ['良好坐姿', '轻度不良', '不良坐姿'],
     datasets: [{
       data: [good, mild, bad],
-      backgroundColor: ['#34a853', '#ffc107', '#ea4335'],
+      // 采用示例中的配色（保持三个分类，依次对应良好/轻度不良/不良）
+      backgroundColor: ['#34a853', '#fbbc05', '#ea4335'],
       borderWidth: 0
     }]
   }
@@ -257,14 +266,27 @@ const renderPie = async () => {
   const ctx = pieCanvas.value.getContext('2d')
   if (pieChart) { pieChart.destroy() }
   pieChart = new Chart(ctx, {
-    type: 'pie',
+    type: 'doughnut',
     data: buildPieDataset(),
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      cutout: '70%', // 环形中空宽度，1:1 参考示例
       plugins: {
-        legend: { display: true, position: 'bottom', labels: { boxWidth: 12 } },
-        tooltip: { enabled: true }
+  legend: { display: false },
+        tooltip: {
+          enabled: true,
+          callbacks: {
+            label: (context) => {
+              const label = context.label || ''
+              const value = Number(context.raw || 0)
+              const dataArr = context.chart?.data?.datasets?.[0]?.data || []
+              const total = dataArr.reduce((s, v) => s + Number(v || 0), 0)
+              const pct = total > 0 ? Math.round((value / total) * 100) : 0
+              return `${label}: ${value}h (${pct}%)`
+            }
+          }
+        }
       }
     }
   })
@@ -291,6 +313,22 @@ const loadPieData = async () => {
     if (activeTab.value !== 'images') await renderPie()
   }
 }
+
+// 图例数据（与饼图同步）：良好/轻度不良/不良坐姿
+const legendData = computed(() => {
+  const { good, mild, bad } = pieDataHours.value || {}
+  const toFixed1 = (n) => Math.round(Number(n || 0) * 10) / 10
+  const g = toFixed1(good)
+  const m = toFixed1(mild)
+  const b = toFixed1(bad)
+  const total = (g + m + b) || 0
+  const pct = (v) => total > 0 ? Math.round((v / total) * 100) : 0
+  return [
+    { key: 'good', label: '良好坐姿', value: g, percent: pct(g) },
+    { key: 'mild', label: '轻度不良', value: m, percent: pct(m) },
+    { key: 'bad',  label: '不良坐姿', value: b, percent: pct(b) }
+  ]
+})
 
 const changeTimePeriod = async (p) => {
   if (timePeriod.value === p) return
@@ -772,17 +810,28 @@ watch(activeTab, async (v, o) => {
 
 /* 坐姿时间占比 饼图样式（简洁版） */
 .pie-card { margin-top: 12px; }
-.pie-wrap { height: 260px; padding: 12px; }
+.pie-wrap { padding: 12px; }
+.pie-canvas-area { height: 220px; display:flex; align-items:center; justify-content:center; }
 .pie-legend { display:flex; justify-content:center; gap:12px; flex-wrap: wrap; margin-top:8px; font-size:11px; color:#495057; }
 .legend-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; }
 .dot-good{ background:#34a853; }
 .dot-mild{ background:#ffc107; }
 .dot-bad{ background:#ea4335; }
 
+/* 与家长端一致的自定义图例（网格 + 圆点 + 文案 + 数值） */
+.legend-grid.pie-legend-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:8px 16px; margin-top:10px; align-items:center; }
+.legend-item { display:flex; align-items:center; gap:8px; font-size:14px; color:#495057; }
+.legend-text { flex: 0 0 auto; }
+.legend-value { margin-left:auto; color:#666; font-variant-numeric: tabular-nums; }
+.legend-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+.legend-good { background-color:#34a853; }
+.legend-mild { background-color:#fbbc05; }
+.legend-bad  { background-color:#ea4335; }
+
 /* 保持两列，不随断点变更 */
 
 /* 饼图相关基础容器样式 */
-.chart-container-styled { display:flex; justify-content:center; align-items:center; background:#fff; border-radius:12px; }
+.chart-container-styled { background:#fff; border-radius:12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
 
 /* 时间段切换按钮组（简化版） */
 .time-period-selector { display:flex; gap:8px; margin-left:auto; }

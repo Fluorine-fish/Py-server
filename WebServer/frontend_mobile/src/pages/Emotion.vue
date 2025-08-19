@@ -1,6 +1,6 @@
 <template>
   <div class="mobile-page">
-    <div class="page-heading">情绪监护</div>
+    <div class="page-heading">情绪监测</div>
     
     <!-- 标签页导航 -->
     <div class="emotion-tabs">
@@ -44,7 +44,7 @@
     <div v-show="activeTab === 'trends'" class="tab-content-panel">
       <div class="mobile-card">
         <div class="mobile-card-header">
-          <div class="mobile-card-title">📈 全天情绪波动趋势</div>
+          <div class="mobile-card-title">📈 情绪波动趋势</div>
         </div>
         <div class="mobile-card-content">
           <div class="chart-container">
@@ -58,7 +58,7 @@
     <div v-show="activeTab === 'radar'" class="tab-content-panel">
       <div class="mobile-card">
         <div class="mobile-card-header">
-          <div class="mobile-card-title">📊 今日情绪多维分析</div>
+          <div class="mobile-card-title">📊 情绪多维分析</div>
         </div>
         <div class="mobile-card-content">
           <div class="chart-container">
@@ -266,7 +266,6 @@ const initCharts = async () => {
       const labels = radar?.labels || ['专注度','愉悦度','放松度','疲劳度','压力值'];
       const current = radar?.current || [85,75,60,30,25];
       charts.radar.setOption({
-        title: { text: '今日情绪多维分析', left: 'center', top: 0 },
         tooltip: { trigger: 'item' },
         legend: { data: ['今日情绪'], bottom: 0 },
         radar: { indicator: labels.map(n => ({ name: n, max: 100 })), radius: '65%' },
@@ -317,7 +316,24 @@ const initCharts = async () => {
       const hm = await monitorApi.getEmotionHeatmap();
       const days = hm?.days || ['周一','周二','周三','周四','周五','周六','周日'];
       const hours = hm?.hours || ['6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22'];
-      const matrix = Array.isArray(hm?.data) ? hm.data : [];
+      let matrix = Array.isArray(hm?.data) ? hm.data : [];
+      // 如果后端返回空矩阵，则使用本地假数据
+      if (!Array.isArray(matrix) || matrix.length === 0) {
+        matrix = Array.from({ length: days.length }, (_, r) =>
+          Array.from({ length: hours.length }, (_, c) => {
+            // 早上情绪较平稳，中午略上升，下午/傍晚较活跃，晚间回落
+            const hour = Number(hours[c]);
+            let base = 0.35;
+            if (hour >= 12 && hour <= 14) base = 0.55;
+            else if (hour >= 15 && hour <= 19) base = 0.7;
+            else if (hour >= 20) base = 0.5;
+            // 周末略高
+            if (r >= 5) base += 0.1;
+            // 限制到 0-1
+            return Math.max(0, Math.min(1, Number((base + (c % 3) * 0.05).toFixed(2))));
+          })
+        );
+      }
       const data = [];
       for (let r=0;r<matrix.length;r++){
         for (let c=0;c<(matrix[r]||[]).length;c++){
@@ -334,7 +350,35 @@ const initCharts = async () => {
         series: [{ name: '情绪值', type: 'heatmap', data, label: { show: false } }]
       });
     } catch(e) {
-      charts.heatmap.setOption({ series: [{ type: 'heatmap', data: [] }] });
+      // 接口失败时使用本地假数据
+      const days = ['周一','周二','周三','周四','周五','周六','周日'];
+      const hours = ['6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22'];
+      const matrix = Array.from({ length: days.length }, (_, r) =>
+        Array.from({ length: hours.length }, (_, c) => {
+          const hour = Number(hours[c]);
+          let base = 0.35;
+          if (hour >= 12 && hour <= 14) base = 0.55;
+          else if (hour >= 15 && hour <= 19) base = 0.7;
+          else if (hour >= 20) base = 0.5;
+          if (r >= 5) base += 0.1; // 周末略高
+          return Math.max(0, Math.min(1, Number((base + (c % 3) * 0.05).toFixed(2))));
+        })
+      );
+      const data = [];
+      for (let r=0;r<matrix.length;r++){
+        for (let c=0;c<matrix[r].length;c++){
+          data.push([r,c,matrix[r][c]]);
+        }
+      }
+      charts.heatmap.setOption({
+        title: { text: '周情绪热力图', left: 'center', top: 0 },
+        tooltip: { position: 'top', formatter: (p)=> `${days[p.data[0]]} ${hours[p.data[1]]}<br>情绪值: ${p.data[2]}` },
+        grid: { top: '15%', left: '3%', right: '4%', bottom: '15%', containLabel: true },
+        xAxis: { type: 'category', data: days, splitArea: { show: true } },
+        yAxis: { type: 'category', data: hours, splitArea: { show: true } },
+        visualMap: { min: 0, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%' },
+        series: [{ name: '情绪值', type: 'heatmap', data, label: { show: false } }]
+      });
     }
   }
 };
@@ -410,11 +454,22 @@ async function refreshEmotionDistribution() {
       { key: 'surprised', name: '惊讶', color: '#FFC107' },
       { key: 'focused', name: '专注', color: '#3A86FF' }
     ];
+    // 构造数据序列，若接口未返回则使用本地假数据（各时段加总100）
+    const fallback = {
+      happy:     [35, 30, 28, 25],
+      neutral:   [30, 35, 32, 38],
+      sad:       [8, 10, 12, 10],
+      angry:     [5, 6, 8, 6],
+      surprised: [12, 10, 10, 8],
+      focused:   [10, 9, 10, 13]
+    };
     const series = mapping.map(m => ({
       name: m.name,
       type: 'bar',
       stack: '情绪',
-      data: (emoData[m.key] || new Array(timeSlots.length).fill(0)),
+      data: (Array.isArray(emoData[m.key]) && emoData[m.key].length === timeSlots.length)
+        ? emoData[m.key]
+        : fallback[m.key],
       itemStyle: { color: m.color }
     }));
     if (charts.bar) {
@@ -422,7 +477,21 @@ async function refreshEmotionDistribution() {
       setTimeout(() => charts.bar.resize(), 100);
     }
   } catch (e) {
-    console.error('获取情绪分布失败:', e);
+    // 接口失败，使用本地假数据渲染
+    const timeSlots = ['上午','中午','下午','晚上'];
+    const mapping = [
+      { key: 'happy', name: '高兴', color: '#4CAF50', data: [35, 30, 28, 25] },
+      { key: 'neutral', name: '平静', color: '#9E9E9E', data: [30, 35, 32, 38] },
+      { key: 'sad', name: '悲伤', color: '#F44336', data: [8, 10, 12, 10] },
+      { key: 'angry', name: '愤怒', color: '#FF9800', data: [5, 6, 8, 6] },
+      { key: 'surprised', name: '惊讶', color: '#FFC107', data: [12, 10, 10, 8] },
+      { key: 'focused', name: '专注', color: '#3A86FF', data: [10, 9, 10, 13] }
+    ];
+    const series = mapping.map(m => ({ name: m.name, type: 'bar', stack: '情绪', data: m.data, itemStyle: { color: m.color } }));
+    if (charts.bar) {
+      charts.bar.setOption({ xAxis: { data: timeSlots }, series });
+      setTimeout(() => charts.bar.resize(), 100);
+    }
   }
 }
 </script>

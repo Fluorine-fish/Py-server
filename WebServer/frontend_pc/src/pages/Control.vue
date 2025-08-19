@@ -55,6 +55,13 @@
               <div class="status-value">{{ lastUpdateTime }}</div>
             </div>
           </div>
+          <div class="status-item">
+            <div class="status-icon">🔄</div>
+            <div class="status-text">
+              <div class="status-label">刷新状态</div>
+              <div class="status-value"><button class="refresh-btn" @click="fetchLampStatus">刷新</button></div>
+            </div>
+          </div>
         </div>
       </div>
       
@@ -94,7 +101,7 @@
           </div>
           <div class="gauge-value">{{ currentTemperature }}</div>
           <div class="gauge-unit">K</div>
-          <div class="gauge-range">范围: 2700-6500 K</div>
+          <div class="gauge-range">范围: 3500-6000 K</div>
         </div>
       </div>
       
@@ -138,6 +145,7 @@
                 v-model="currentBrightness" 
                 :min="100" 
                 :max="1000"
+                :step="200"
                 :disabled="!lampPowerOn || !lampLightOn"
                 @change="adjustBrightness"
               />
@@ -148,6 +156,13 @@
               <span>1000<small>明亮</small></span>
             </div>
             <div class="quick-buttons">
+              <button 
+                class="quick-btn danger" 
+                @click="setBrightness(0)"
+                :disabled="!lampPowerOn"
+              >
+                关灯
+              </button>
               <button 
                 class="quick-btn" 
                 @click="setBrightness(200)"
@@ -181,35 +196,36 @@
             <div class="slider-container">
               <van-slider 
                 v-model="currentTemperature" 
-                :min="2700" 
-                :max="6500"
+                :min="3500" 
+                :max="6000"
+                :step="800"
                 :disabled="!lampPowerOn || !lampLightOn"
                 @change="adjustTemperature"
               />
             </div>
             <div class="slider-marks">
-              <span>2700<small>暖光</small></span>
-              <span>4600<small>自然光</small></span>
-              <span>6500<small>冷光</small></span>
+              <span>3500<small>暖光</small></span>
+              <span>4300<small>自然光</small></span>
+              <span>5900<small>冷光</small></span>
             </div>
             <div class="quick-buttons">
               <button 
                 class="quick-btn" 
-                @click="setTemperature(2700)"
+                @click="setTemperature(3500)"
                 :disabled="!lampPowerOn || !lampLightOn"
               >
                 暖光
               </button>
               <button 
                 class="quick-btn" 
-                @click="setTemperature(4600)"
+                @click="setTemperature(4300)"
                 :disabled="!lampPowerOn || !lampLightOn"
               >
                 自然光
               </button>
               <button 
                 class="quick-btn" 
-                @click="setTemperature(6500)"
+                @click="setTemperature(5900)"
                 :disabled="!lampPowerOn || !lampLightOn"
               >
                 冷光
@@ -376,7 +392,7 @@ export default {
       lampPowerOn: true,
       lampLightOn: true,
       currentBrightness: 500,
-      currentTemperature: 4600,
+  currentTemperature: 5300,
       lastUpdateTime: this.getCurrentTime(),
       restInterval: 20,
       eyeStrainLimit: 60,
@@ -384,50 +400,133 @@ export default {
         voice: true,
         light: true,
         message: false
-      }
+  },
+  _lastSentBrightness: null,
+  _lastSentColor: null
     }
   },
   mounted() {
     this.fetchLampStatus();
   },
   methods: {
-    fetchLampStatus() {
-      // 模拟从API获取台灯状态
-      console.log('获取台灯状态...');
-      
-      // 假设已从API获取数据
-      this.lastUpdateTime = this.getCurrentTime();
-    },
-    togglePower() {
-      if (!this.lampPowerOn) {
-        this.lampLightOn = false;
+    async fetchLampStatus() {
+      try {
+        const res = await fetch('/api/lamp/status');
+        const data = await res.json();
+        if (data && data.status) {
+          const st = data.status;
+          this.lampPowerOn = !!st.power;
+          this.lampLightOn = this.lampPowerOn;
+          const curUnits = typeof st.brightness === 'number' ? st.brightness : this.currentBrightness;
+          this.currentBrightness = this._alignBrightnessUnits(curUnits);
+          const curK = typeof st.color_temp === 'number' ? st.color_temp : this.currentTemperature;
+          this.currentTemperature = this._alignColorTemp(curK);
+        }
+      } catch (e) {
+        console.warn('获取台灯状态失败，使用默认内存态', e);
+      } finally {
+        this.lastUpdateTime = this.getCurrentTime();
       }
-      this.sendSerialCommand(this.lampPowerOn ? 'power_on' : 'power_off');
     },
-    toggleLight() {
-      this.sendSerialCommand(this.lampLightOn ? 'light_on' : 'light_off');
+    async togglePower() {
+      try {
+        const res = await fetch('/api/control/light/power', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ power: this.lampPowerOn })
+        });
+        const data = await res.json();
+        if (data && data.success) {
+          const st = data.status || {};
+          this.lampPowerOn = !!(st.power ?? this.lampPowerOn);
+          this.lampLightOn = this.lampPowerOn;
+          if (typeof st.brightness === 'number') this.currentBrightness = this._alignBrightnessUnits(st.brightness);
+          if (typeof st.color_temp === 'number') this.currentTemperature = this._alignColorTemp(st.color_temp);
+        }
+      } catch (e) {
+        console.error('设置电源失败', e);
+        // 回滚
+        this.lampPowerOn = !this.lampPowerOn;
+        this.lampLightOn = this.lampPowerOn;
+      }
     },
-    adjustBrightness(value) {
-      console.log(`调节亮度: ${value}`);
+    async toggleLight() {
+      // 与电源保持一致
+      this.lampLightOn = !this.lampLightOn;
+      this.lampPowerOn = this.lampLightOn;
+      await this.togglePower();
+    },
+    async adjustBrightness(value) {
+      const alignedUnits = this._alignBrightnessUnits(value);
+      if (this._lastSentBrightness === alignedUnits) return;
+      this._lastSentBrightness = alignedUnits;
+      this.currentBrightness = alignedUnits;
+      try {
+        const percent = Math.round(alignedUnits / 10);
+        const res = await fetch('/api/control/light/brightness', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ brightness: percent })
+        });
+        const data = await res.json();
+        if (data && data.status) {
+          const st = data.status;
+          this.lampPowerOn = !!(st.power ?? this.lampPowerOn);
+          this.lampLightOn = this.lampPowerOn;
+          if (typeof st.brightness === 'number') this.currentBrightness = this._alignBrightnessUnits(st.brightness);
+        }
+      } catch (e) {
+        console.error('设置亮度失败', e);
+      }
     },
     setBrightness(value) {
-      this.currentBrightness = value;
-      this.adjustBrightness(value);
+      this.currentBrightness = this._alignBrightnessUnits(value);
+      this.adjustBrightness(this.currentBrightness);
     },
-    adjustTemperature(value) {
-      console.log(`调节色温: ${value}`);
+    async adjustTemperature(value) {
+      const alignedK = this._alignColorTemp(value);
+      if (this._lastSentColor === alignedK) return;
+      this._lastSentColor = alignedK;
+      this.currentTemperature = alignedK;
+      try {
+        const res = await fetch('/api/control/light/color', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ temperature: alignedK })
+        });
+        const data = await res.json();
+        if (data && data.status) {
+          const st = data.status;
+          if (typeof st.color_temp === 'number') this.currentTemperature = this._alignColorTemp(st.color_temp);
+        }
+      } catch (e) {
+        console.error('设置色温失败', e);
+      }
     },
     setTemperature(value) {
-      this.currentTemperature = value;
-      this.adjustTemperature(value);
+      this.currentTemperature = this._alignColorTemp(value);
+      this.adjustTemperature(this.currentTemperature);
     },
-    applyLightSettings() {
-      this.sendSerialCommand(`set_brightness=${this.currentBrightness}&set_temperature=${this.currentTemperature}`);
+    async applyLightSettings() {
+      await this.adjustBrightness(this.currentBrightness);
+      await this.adjustTemperature(this.currentTemperature);
       alert(`已应用灯光设置: 亮度=${this.currentBrightness} Lux, 色温=${this.currentTemperature} K`);
     },
-    sendSerialCommand(command) {
-      console.log(`发送串口命令: ${command}`);
-      // 实际应用中这里会发送API请求到后端
+    _alignBrightnessUnits(val) {
+      const clamped = Math.max(0, Math.min(1000, Number(val) || 0));
+      let aligned = Math.round(clamped / 200) * 200;
+      aligned = Math.max(0, Math.min(1000, aligned));
+      return aligned;
+    },
+    _alignColorTemp(k) {
+      const clamped = Math.max(3500, Math.min(6000, Number(k) || 3500));
+      const slots = [3500, 4300, 5100, 5900];
+      let best = slots[0], diff = Math.abs(clamped - best);
+      for (const s of slots) {
+        const d = Math.abs(clamped - s);
+        if (d < diff) { best = s; diff = d; }
+      }
+      return best;
     },
     setRestInterval(minutes) {
       this.restInterval = minutes;
@@ -458,8 +557,8 @@ export default {
       return (this.currentBrightness - 100) / 900 * 180;
     },
     getTemperatureRotation() {
-      // 将色温值(2700-6500)映射到角度(0-180)
-      return (this.currentTemperature - 2700) / 3800 * 180;
+      // 将色温值(3500-6000)映射到角度(0-180)
+      return (this.currentTemperature - 3500) / 2500 * 180;
     }
   }
 }

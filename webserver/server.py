@@ -119,6 +119,14 @@ class WebServer:
         except Exception as e:
             print(f"[WebServer] 未能挂载 realtime_data 路由：{e}")
 
+        # 挂载台灯控制路由
+        try:
+            from WebServer.backend.routers import lamp_router
+            app.include_router(lamp_router, tags=["Lamp Control API"])
+            print("[WebServer] 成功挂载 lamp_control 路由 (/api/lamp)")
+        except Exception as e:
+            print(f"[WebServer] 未能挂载 lamp_control 路由：{e}")
+
     # 注意：正常情况下由 mobile_api 统一引入视频流路由
 
         if self.include_mock:

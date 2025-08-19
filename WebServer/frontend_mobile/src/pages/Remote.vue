@@ -13,8 +13,9 @@
             <i class="bi bi-brightness-low"></i>
             <van-slider
               v-model="brightness"
-              :min="1"
-              :max="100"
+        :min="0"
+        :max="100"
+        :step="20"
               @change="updateBrightness"
             />
             <i class="bi bi-brightness-high"></i>
@@ -23,19 +24,19 @@
         </div>
         
         <div class="brightness-presets">
-          <div class="preset-button" @click="setBrightness(25)">
+      <div class="preset-button" @click="setBrightness(20)">
             <i class="bi bi-moon"></i>
             <span>夜间</span>
           </div>
-          <div class="preset-button" @click="setBrightness(50)">
+      <div class="preset-button" @click="setBrightness(40)">
             <i class="bi bi-cloud-sun"></i>
             <span>舒适</span>
           </div>
-          <div class="preset-button" @click="setBrightness(75)">
+      <div class="preset-button" @click="setBrightness(60)">
             <i class="bi bi-sun"></i>
             <span>标准</span>
           </div>
-          <div class="preset-button" @click="setBrightness(100)">
+      <div class="preset-button" @click="setBrightness(80)">
             <i class="bi bi-lightbulb"></i>
             <span>明亮</span>
           </div>
@@ -54,9 +55,9 @@
             <i class="bi bi-thermometer-low"></i>
             <van-slider
               v-model="colorTemperature"
-              :min="2700"
-              :max="6500"
-              :step="100"
+              :min="3500"
+              :max="6000"
+              :step="800"
               @change="updateColorTemperature"
             />
             <i class="bi bi-thermometer-high"></i>
@@ -67,17 +68,21 @@
         <div class="temperature-display" :style="temperatureColorStyle"></div>
         
         <div class="temperature-presets">
-          <div class="preset-button" @click="setColorTemperature(2700)">
+          <div class="preset-button" @click="setColorTemperature(3500)">
             <span>暖光</span>
-            <span class="temp-value">2700K</span>
+            <span class="temp-value">3500K</span>
           </div>
-          <div class="preset-button" @click="setColorTemperature(4000)">
+          <div class="preset-button" @click="setColorTemperature(4300)">
             <span>中性光</span>
-            <span class="temp-value">4000K</span>
+            <span class="temp-value">4300K</span>
           </div>
-          <div class="preset-button" @click="setColorTemperature(6500)">
+          <div class="preset-button" @click="setColorTemperature(5100)">
             <span>冷光</span>
-            <span class="temp-value">6500K</span>
+            <span class="temp-value">5100K</span>
+          </div>
+          <div class="preset-button" @click="setColorTemperature(5900)">
+            <span>偏冷</span>
+            <span class="temp-value">5900K</span>
           </div>
         </div>
       </div>
@@ -146,17 +151,20 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue';
 import { Toast } from 'vant';
 import { useDeviceStore } from '../stores';
-import { controlApi } from '../api';
+import { controlApi, lampApi } from '../api';
 
 const deviceStore = useDeviceStore();
 
 // 灯光状态
 const isOn = ref(true);
 const brightness = ref(70);
-const colorTemperature = ref(4000);
+const colorTemperature = ref(5300);
 const autoAdjust = ref(true);
 const studyMode = ref(false);
 const timerMode = ref(false);
+
+// 防重复提交的最近一次值
+const lastSent = ref({ brightness: null, color: null });
 
 // 定时设置
 const showTimerDialog = ref(false);
@@ -171,18 +179,20 @@ const selectedDays = ref(['一', '二', '三', '四', '五']);
 const temperatureColorStyle = computed(() => {
   // 将开尔文色温转换为近似的RGB
   const temp = colorTemperature.value;
+  // 限制在新范围内
+  const t = Math.max(3500, Math.min(6000, temp));
   let r, g, b;
   
-  if (temp <= 4000) {
+  if (t <= 4300) {
     // 暖色调
     r = 255;
-    g = Math.round(160 + (temp - 2700) * 0.08);
-    b = Math.round(109 + (temp - 2700) * 0.12);
+    g = Math.round(180 + (t - 3500) * 0.05);
+    b = Math.round(120 + (t - 3500) * 0.06);
   } else {
     // 冷色调
-    r = Math.round(255 - (temp - 4000) * 0.03);
-    g = Math.round(240 - (temp - 4000) * 0.015);
-    b = Math.round(200 + (temp - 4000) * 0.022);
+    r = Math.round(245 - (t - 4300) * 0.03);
+    g = Math.round(235 - (t - 4300) * 0.016);
+    b = Math.round(200 + (t - 4300) * 0.022);
   }
   
   return {
@@ -244,8 +254,12 @@ const syncDeviceSettings = async () => {
 
 // 更新亮度
 const updateBrightness = async () => {
+  const aligned = alignBrightness(brightness.value);
+  if (lastSent.value.brightness === aligned) return; // 跳过重复
+  brightness.value = aligned;
+  lastSent.value.brightness = aligned;
   try {
-    await controlApi.setLightBrightness(brightness.value);
+    await controlApi.setLightBrightness(aligned);
     Toast.success('亮度已更新');
   } catch (error) {
     Toast.fail('操作失败');
@@ -253,16 +267,26 @@ const updateBrightness = async () => {
   }
 };
 
-// 设置预设亮度
+// 亮度步进对齐（20%一档，最高建议到80%防止过冲）
+const alignBrightness = (val) => {
+  const clamped = Math.max(0, Math.min(100, val));
+  return Math.min(80, Math.round(clamped / 20) * 20);
+};
+
+// 设置预设亮度（对齐后提交）
 const setBrightness = (value) => {
-  brightness.value = value;
+  brightness.value = alignBrightness(value);
   updateBrightness();
 };
 
 // 更新色温
 const updateColorTemperature = async () => {
+  const aligned = alignColorTemp(colorTemperature.value);
+  if (lastSent.value.color === aligned) return; // 跳过重复
+  colorTemperature.value = aligned;
+  lastSent.value.color = aligned;
   try {
-    await controlApi.setLightColor({ temperature: colorTemperature.value });
+    await controlApi.setLightColor({ temperature: aligned });
     Toast.success('色温已更新');
   } catch (error) {
     Toast.fail('操作失败');
@@ -270,9 +294,21 @@ const updateColorTemperature = async () => {
   }
 };
 
-// 设置预设色温
+// 色温步进对齐（3500..6000，步长800 → 3500/4300/5100/5900）
+const alignColorTemp = (k) => {
+  const clamped = Math.max(3500, Math.min(6000, k));
+  const slots = [3500, 4300, 5100, 5900];
+  let best = slots[0], diff = Math.abs(clamped - best);
+  for (const s of slots) {
+    const d = Math.abs(clamped - s);
+    if (d < diff) { best = s; diff = d; }
+  }
+  return best;
+};
+
+// 设置预设色温（对齐后提交）
 const setColorTemperature = (value) => {
-  colorTemperature.value = value;
+  colorTemperature.value = alignColorTemp(value);
   updateColorTemperature();
 };
 
@@ -309,9 +345,9 @@ const toggleStudyMode = () => {
   studyMode.value = !studyMode.value;
   
   if (studyMode.value) {
-    // 设置学习模式参数
-    brightness.value = 85;
-    colorTemperature.value = 5500;
+    // 设置学习模式参数（对齐步进）
+    brightness.value = 60;      // 20%步进中的合适档位
+    colorTemperature.value = 5100; // 800K步进中的合适档位
     updateBrightness();
     updateColorTemperature();
     Toast.success('学习模式已开启');
@@ -348,17 +384,34 @@ const confirmTimer = () => {
 // 加载设备数据
 onMounted(async () => {
   await deviceStore.fetchDeviceStatus();
-  await syncDeviceSettings();
-  
+
+  // 优先获取真实台灯状态（串口）并同步到UI
+  try {
+    const res = await lampApi.getStatus();
+    if (res && res.status) {
+      const st = res.status;
+  // 映射并对齐步进：亮度(0-1000)->百分比(20%档)；色温对齐(800K档)；电源状态
+  const curBrightness = typeof st.brightness === 'number' ? alignBrightness(st.brightness / 10) : brightness.value;
+  const curTemp = typeof st.color_temp === 'number' ? alignColorTemp(st.color_temp) : colorTemperature.value;
+      const curPower = typeof st.power === 'boolean' ? st.power : isOn.value;
+      brightness.value = curBrightness;
+      colorTemperature.value = curTemp;
+      isOn.value = curPower;
+    } else {
+      await syncDeviceSettings();
+    }
+  } catch (e) {
+    // 串口不可用时回退到内存设置
+    await syncDeviceSettings();
+  }
+
   // 页面加载完成后多次刷新色温显示条，确保正确渲染
   setTimeout(() => {
     refreshColorTemperatureDisplay();
   }, 300);
-  
   setTimeout(() => {
     refreshColorTemperatureDisplay();
   }, 600);
-  
   setTimeout(() => {
     refreshColorTemperatureDisplay();
   }, 1000);

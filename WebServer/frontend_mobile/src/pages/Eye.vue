@@ -239,18 +239,69 @@ const initCharts = async () => {
         responsive: true,
         maintainAspectRatio: false,
         plugins: { legend: { position: 'bottom' } },
-        scales: { y: { beginAtZero: true } }
+        scales: {
+          x: {
+            grid: {
+              color: (ctx) => (ctx?.index % 3 === 0 ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.05)'),
+              lineWidth: (ctx) => (ctx?.index % 3 === 0 ? 1 : 0.5)
+            },
+            ticks: {
+              autoSkip: false,
+              callback: (val, idx) => (idx % 3 === 0 ? charts.trends?.data?.labels?.[idx] : '')
+            }
+          },
+          y: { beginAtZero: true }
+        }
       }
     });
     try {
       const trend = await monitorApi.getEyeTrends();
-      const labels = trend?.labels || ['00:00','04:00','08:00','12:00','16:00','20:00'];
-      const ds = trend?.datasets || [
-        { label: '眨眼频率', data: [15,18,22,19,16,20], borderColor: '#3b82f6' },
-        { label: '用眼距离', data: [45,42,38,41,44,46], borderColor: '#10b981' }
+      // 统一横坐标为 08:00-20:00（每小时一格），显示每3小时主网格
+      const hourLabels = Array.from({ length: 13 }, (_, i) => String(8 + i).padStart(2, '0') + ':00');
+      let rawLabels = Array.isArray(trend?.labels) ? trend.labels : [];
+      const ds = Array.isArray(trend?.datasets) && trend.datasets.length ? trend.datasets : [];
+
+      // 构建从原始标签到小时值的映射，便于按整点重采样
+      const parseHour = (t) => {
+        const m = String(t).match(/(\d{1,2})\s*:?/);
+        if (!m) return NaN;
+        const h = parseInt(m[1], 10);
+        return isNaN(h) ? NaN : h;
+      };
+      const hourToIndex = new Map(hourLabels.map((h, i) => [parseHour(h), i]));
+
+      // 将数据重采样到整点（08..20），若缺失则用最近的已知值/0填充
+      const remapDataset = (d) => {
+        const arr = Array.isArray(d.data) ? d.data : [];
+        const map = new Map();
+        rawLabels.forEach((lab, i) => {
+          const h = parseHour(lab);
+          if (!isNaN(h)) map.set(h, Number(arr[i]))
+        });
+        const out = new Array(hourLabels.length).fill(undefined);
+        for (const [h, idx] of hourToIndex.entries()) {
+          if (map.has(h)) out[idx] = map.get(h);
+        }
+        // 前向/后向填充
+        let last = 0;
+        for (let i = 0; i < out.length; i++) {
+          if (typeof out[i] !== 'number' || isNaN(out[i])) out[i] = last;
+          else last = out[i];
+        }
+        for (let i = out.length - 2; i >= 0; i--) {
+          if (out[i] === 0 && out[i + 1] > 0) out[i] = out[i + 1];
+        }
+        return out;
+      };
+
+      // 如果后端没有数据，使用更密集的本地假数据（每小时一个点）
+      const defaultDatasets = ds.length ? ds.map(d => ({ ...d, data: remapDataset(d) })) : [
+        { label: '眨眼频率', borderColor: '#3b82f6', data: [14,16,18,20,22,21,19,18,17,18,19,20,19] },
+        { label: '用眼距离', borderColor: '#10b981', data: [48,47,46,45,44,43,42,43,44,45,46,47,48] }
       ];
-      charts.trends.data.labels = labels;
-      charts.trends.data.datasets = ds.map(d => ({
+
+      charts.trends.data.labels = hourLabels;
+      charts.trends.data.datasets = defaultDatasets.map(d => ({
         ...d,
         backgroundColor: (d.borderColor || '#3b82f6') + '22',
         fill: true,
@@ -258,7 +309,14 @@ const initCharts = async () => {
       }));
       charts.trends.update('active');
     } catch(e) {
-      // fallback 保留空图或默认数据
+      // fallback：固定 08:00-20:00 每小时刻度，主网格为每3小时
+      const labels = Array.from({ length: 13 }, (_, i) => String(8 + i).padStart(2, '0') + ':00');
+      charts.trends.data.labels = labels;
+      charts.trends.data.datasets = [
+        { label: '眨眼频率', data: [14,16,18,20,22,21,19,18,17,18,19,20,19], borderColor: '#3b82f6', backgroundColor: '#3b82f622', fill: true, tension: 0.35 },
+        { label: '用眼距离', data: [48,47,46,45,44,43,42,43,44,45,46,47,48], borderColor: '#10b981', backgroundColor: '#10b98122', fill: true, tension: 0.35 }
+      ];
+      charts.trends.update('active');
     }
   }
 };
@@ -298,8 +356,29 @@ const initEChartsLazy = async () => {
       const hm = await monitorApi.getEyeHeatmap();
       const hours = hm?.hours || ['6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22'];
       const days = hm?.days || ['周一','周二','周三','周四','周五','周六','周日'];
-      // 将二维矩阵 data 转换为 [x,y,val] 三元组
-      const matrix = Array.isArray(hm?.data) ? hm.data : [];
+      // 将二维矩阵 data 转换为 [x,y,val] 三元组；若数据缺失或不完整则使用本地假数据（补齐周一到周日）
+      let matrix = Array.isArray(hm?.data) ? hm.data : [];
+      const needMock = !Array.isArray(matrix) || matrix.length !== days.length || matrix.some(row => !Array.isArray(row) || row.length !== hours.length);
+      if (needMock) {
+        // 生成 7天 × 小时数 的用眼强度假数据（0-10），带有“日差异与相位偏移”以更真实
+        const dayOffset = [0, -1, 1, 0, 2, -1, -2]; // 周一到周日的整体偏移
+        const dayPhase = [0, 1, -1, 0, 0, 1, -1];   // 峰值时段的小时相位偏移
+        matrix = Array.from({ length: days.length }, (_, r) =>
+          Array.from({ length: hours.length }, (_, c) => {
+            const h = parseInt(hours[c], 10) + (dayPhase[r] || 0);
+            let base = 2; // 6-7点较低
+            if (h >= 8 && h <= 10) base = 4 + ((c + r) % 2);           // 上午逐步升高，按天交错
+            else if (h >= 11 && h <= 13) base = 6 + ((c + r) % 2);      // 中午偏高
+            else if (h >= 14 && h <= 17) base = 7 + ((c + r) % 3);      // 下午最高，按天交错
+            else if (h >= 18 && h <= 20) base = 6 + ((c + r) % 2);      // 傍晚较高
+            else if (h >= 21) base = 4;                                 // 晚间回落
+            base += (dayOffset[r] || 0);
+            // 周末整体更易波动：再加轻微锯齿
+            if (r >= 5) base += ((c % 4) === 0 ? 1 : 0);
+            return Math.max(0, Math.min(10, Math.round(base)));
+          })
+        );
+      }
       const data = [];
       for (let r = 0; r < matrix.length; r++) {
         for (let c = 0; c < (matrix[r] || []).length; c++) {
@@ -361,8 +440,44 @@ const initEChartsLazy = async () => {
       }]
       });
     } catch(e) {
-      // 保留默认空热力图
-      charts.heatmap.setOption({ series: [{ type: 'heatmap', data: [] }] });
+      // 接口失败：渲染完整一周（周一-周日）的本地“交错化”假数据
+      const hours = ['6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22'];
+      const days = ['周一','周二','周三','周四','周五','周六','周日'];
+      const dayOffset = [0, -1, 1, 0, 2, -1, -2];
+      const dayPhase = [0, 1, -1, 0, 0, 1, -1];
+      const matrix = Array.from({ length: days.length }, (_, r) =>
+        Array.from({ length: hours.length }, (_, c) => {
+          const h = parseInt(hours[c], 10) + (dayPhase[r] || 0);
+          let base = 2;
+          if (h >= 8 && h <= 10) base = 4 + ((c + r) % 2);
+          else if (h >= 11 && h <= 13) base = 6 + ((c + r) % 2);
+          else if (h >= 14 && h <= 17) base = 7 + ((c + r) % 3);
+          else if (h >= 18 && h <= 20) base = 6 + ((c + r) % 2);
+          else if (h >= 21) base = 4;
+          base += (dayOffset[r] || 0);
+          if (r >= 5) base += ((c % 4) === 0 ? 1 : 0);
+          return Math.max(0, Math.min(10, Math.round(base)));
+        })
+      );
+      const data = [];
+      for (let r = 0; r < matrix.length; r++) {
+        for (let c = 0; c < matrix[r].length; c++) {
+          data.push([c, r, matrix[r][c]]);
+        }
+      }
+      charts.heatmap.setOption({
+        tooltip: {
+          position: 'top',
+          formatter: function (params) {
+            return `${days[params.value[1]]} ${hours[params.value[0]]}<br/>用眼强度: ${params.value[2]}`;
+          }
+        },
+        grid: { height: '50%', top: '10%' },
+        xAxis: { type: 'category', data: hours, splitArea: { show: true }, axisLabel: { interval: 2 } },
+        yAxis: { type: 'category', data: days, splitArea: { show: true } },
+        visualMap: { min: 0, max: 10, calculable: true, orient: 'horizontal', left: 'center', bottom: '15%', inRange: { color: ['#e3f2fd', '#90caf9', '#42a5f5', '#1976d2', '#0d47a1'] } },
+        series: [{ name: '用眼强度', type: 'heatmap', data, label: { show: false }, emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.5)' } } }]
+      });
     }
   }
 
