@@ -97,10 +97,8 @@
         </div>
         <div class="mobile-card-content">
           <!-- 时间占比 饼图 -->
-          <div class="mobile-card-header">
-            <div class="mobile-card-title"> 📊 坐姿时间占比 </div>
-          </div>
           <div v-show="activeTab==='analysis'">
+            <h3 class="pie-section-title"> 📊 坐姿时间占比 </h3>
             <div class="chart-container-styled pie-wrap">
               <div class="pie-canvas-area">
                 <canvas ref="pieCanvas"></canvas>
@@ -574,7 +572,7 @@ watch(activeTab, async (v, o) => {
 }
 
 .tool-text-unified {
-  font-size: 16px; /* 放大按钮文字，与首页一致 */
+  font-size: 13px; /* 放大按钮文字，与首页一致 */
   color: var(--color-text);
   font-weight: 600; /* 稍微减轻一点粗细 */
   text-align: left; /* 左对齐 */
@@ -789,13 +787,13 @@ watch(activeTab, async (v, o) => {
     padding: 0 !important;
     margin: 0 !important; /* 去掉边距 */
     
-    font-size: 14px; /* 响应式下的图标字体 */
+    font-size: 13px; /* 响应式下的图标字体 */
     
     box-shadow: 0 1px 3px rgba(108, 117, 125, 0.2) !important;
   }
   
   .tool-text-unified {
-  font-size: 14px; /* 响应式下放大后的文字字体 */
+  font-size: 13px; /* 响应式下放大后的文字字体 */
     font-weight: 600; /* 保持适中粗细 */
     text-align: left;
     display: -webkit-box;
@@ -812,6 +810,7 @@ watch(activeTab, async (v, o) => {
 .pie-card { margin-top: 12px; }
 .pie-wrap { padding: 12px; }
 .pie-canvas-area { height: 220px; display:flex; align-items:center; justify-content:center; }
+.pie-section-title { color:#000 !important; margin: 0 0 8px 4px; font-weight:600; }
 .pie-legend { display:flex; justify-content:center; gap:12px; flex-wrap: wrap; margin-top:8px; font-size:11px; color:#495057; }
 .legend-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; }
 .dot-good{ background:#34a853; }

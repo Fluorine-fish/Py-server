@@ -304,36 +304,39 @@ class ChatbotService:
 
         kws_models = ["Audio/Snowboy/resources/models/lampbot.pmdl"]
 
-        detector = snowboydecoder.HotwordDetector(kws_models, sensitivity=0.9)
-        print("正在监听唤醒词... 按 Ctrl+C 退出")
-        detector.start(sleep_time=0.03, stop_on_detect=True)
-        detector.terminate()
-        print("唤醒词被检测到，开始语音识别...")
-        msg = "你好，小灵"
-        self.send_message(msg) # 语音识别成功的交互
+        # detector = snowboydecoder.HotwordDetector(kws_models, sensitivity=0.9)
+        # print("正在监听唤醒词... 按 Ctrl+C 退出")
+        # detector.start(sleep_time=0.03, stop_on_detect=True)
+        # detector.terminate()
+        # print("唤醒词被检测到，开始语音识别...")
 
-        start_time = datetime.now()
-        timeout_seconds = TIME_OUT
+        # key_input
+        if input() == "s":
+            msg = "你好，小灵"
+            self.send_message(msg) # 语音识别成功的交互
 
-        for i in range(30): #允许最多30次对话，对话之后进入休眠
-            current_time = datetime.now()
-            elapsed_time = (current_time - start_time).total_seconds()
-            
-            if elapsed_time >= timeout_seconds:
-                print(f"==>对话超时({timeout_seconds}秒)，助手将进入休眠状态<==")
-                break
+            start_time = datetime.now()
+            timeout_seconds = TIME_OUT
 
-            sentence = self.my_agent.get_message()
+            for i in range(30): #允许最多30次对话，对话之后进入休眠
+                current_time = datetime.now()
+                elapsed_time = (current_time - start_time).total_seconds()
+                
+                if elapsed_time >= timeout_seconds:
+                    print(f"==>对话超时({timeout_seconds}秒)，助手将进入休眠状态<==")
+                    break
 
-            if ("休息" in sentence or "结束" in sentence or "退出" in sentence) and AUTO_RETURN:
-                print("==>检测到结束语，助手将进入休眠状态<==")
-                break
-            print(f"==>识别结果：{sentence}<==")
-            self.my_agent.send_message(sentence)
+                sentence = self.my_agent.get_message()
 
-        msg = "小灵先休息啦，有事情可以随时叫我哦！"
-        self.my_agent.speak_text(msg)
-        print("==>对话结束，助手进入休眠状态<==")
+                if ("休息" in sentence or "结束" in sentence or "退出" in sentence) and AUTO_RETURN:
+                    print("==>检测到结束语，助手将进入休眠状态<==")
+                    break
+                print(f"==>识别结果：{sentence}<==")
+                self.my_agent.send_message(sentence)
+
+        # msg = "小灵先休息啦，有事情可以随时叫我哦！"
+        # self.my_agent.speak_text(msg)
+        # print("==>对话结束，助手进入休眠状态<==")
 
     def reset(self):
         """重置对话上下文"""

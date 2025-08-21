@@ -20,9 +20,9 @@ DEBUG = True  # 设置为True开启调试模式，False关闭调试模式
 DEBUG_BUTTON_VISIBLE = True  # 控制main.html中调试按钮的显示
 
 # 语音助手配置
-ENABLE_CHATBOT = False  # 是否启用语音助手
-ENABLE_WELCOME_MESSAGE = False  # 是否启用欢迎消息
-AUTO_START_CHATBOT_LOOP = False  # 是否自动启动语音助手对话循环
+ENABLE_CHATBOT = True  # 是否启用语音助手
+ENABLE_WELCOME_MESSAGE = True  # 是否启用欢迎消息
+AUTO_START_CHATBOT_LOOP = True  # 是否自动启动语音助手对话循环
 
 #尽量不要使用QWEN3以后版本模型：
 # CHATBOT_MODULE = "qwen-plus-2025-04-28" # 千问plus 4.28的快照目前仍有问题
