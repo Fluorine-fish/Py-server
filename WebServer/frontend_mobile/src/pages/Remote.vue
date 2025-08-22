@@ -85,6 +85,18 @@
             <span class="temp-value">5900K</span>
           </div>
         </div>
+
+        <!-- 提醒快捷按钮：与色温调用方式一致，调用后端转发到 chatbot -->
+        <div class="reminder-actions">
+          <button class="reminder-btn" @click="triggerVisionReminder">
+            <i class="bi bi-binoculars"></i>
+            <span>远眺提醒</span>
+          </button>
+          <button class="reminder-btn" @click="triggerPostureReminder">
+            <i class="bi bi-alarm"></i>
+            <span>久坐提醒</span>
+          </button>
+        </div>
       </div>
     </div>
     
@@ -312,6 +324,35 @@ const setColorTemperature = (value) => {
   updateColorTemperature();
 };
 
+// 触发提醒：远眺/久坐（调用与色温一致的后端转发逻辑）
+const triggerVisionReminder = async () => {
+  try {
+    const res = await lampApi.sendVisionReminder();
+    if (res && res.success) {
+      Toast.success('已触发远眺提醒');
+    } else {
+      Toast.fail('触发失败');
+    }
+  } catch (e) {
+    console.error(e);
+    Toast.fail('触发失败');
+  }
+};
+
+const triggerPostureReminder = async () => {
+  try {
+    const res = await lampApi.sendPostureReminder();
+    if (res && res.success) {
+      Toast.success('已触发久坐提醒');
+    } else {
+      Toast.fail('触发失败');
+    }
+  } catch (e) {
+    console.error(e);
+    Toast.fail('触发失败');
+  }
+};
+
 // 开关控制
 const togglePower = async () => {
   isOn.value = !isOn.value;
@@ -528,6 +569,29 @@ onMounted(async () => {
   /* 确保色温颜色能够叠加在深色背景上 */
   background-blend-mode: overlay;
 }
+
+.reminder-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.reminder-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 8px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(230, 242, 237, 0.8);
+  background: var(--gradient-light);
+  color: #1B4332;
+  box-shadow: 0 2px 6px rgba(27, 67, 50, 0.12);
+}
+
+.reminder-btn i { font-size: 18px; }
 
 .control-grid {
   display: grid;

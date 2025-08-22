@@ -20,6 +20,13 @@ except Exception as e:
     # 延迟在请求时抛错
     get_lampbot_instance = None  # type: ignore
 
+# 引入 chatbot 提醒带语音的方法
+try:
+    from modules.chatbot_module import posture_reminder_voiced, vision_reminder_voiced
+except Exception:
+    posture_reminder_voiced = None  # type: ignore
+    vision_reminder_voiced = None  # type: ignore
+
 
 router = APIRouter(prefix="/api/lamp", tags=["lamp_control"])
 
@@ -241,9 +248,11 @@ async def lamp_mode_learning():
 
 @router.post("/reminder/posture")
 async def lamp_reminder_posture():
-    svc = _get_service()
+    # 优先调用 chatbot 模块的语音提醒版本
     try:
-        ok = await asyncio.to_thread(svc.posture_reminder)
+        if posture_reminder_voiced is None:
+            raise RuntimeError("chatbot 模块未就绪")
+        ok = await asyncio.to_thread(posture_reminder_voiced)
         return {"success": ok == "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"坐姿提醒失败: {e}")
@@ -251,9 +260,11 @@ async def lamp_reminder_posture():
 
 @router.post("/reminder/vision")
 async def lamp_reminder_vision():
-    svc = _get_service()
+    # 优先调用 chatbot 模块的语音提醒版本
     try:
-        ok = await asyncio.to_thread(svc.vision_reminder)
+        if vision_reminder_voiced is None:
+            raise RuntimeError("chatbot 模块未就绪")
+        ok = await asyncio.to_thread(vision_reminder_voiced)
         return {"success": ok == "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"远眺提醒失败: {e}")
