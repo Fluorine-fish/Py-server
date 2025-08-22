@@ -188,6 +188,22 @@ export const controlApi = {
   }
 };
 
+// 台灯真实状态API
+export const lampApi = {
+  // 获取真实台灯状态（串口返回）
+  getStatus() {
+    return api.get('/lamp/status');
+  },
+  // 触发远眺提醒（调用后端转发到 chatbot 的 vision_reminder）
+  sendVisionReminder() {
+    return api.post('/lamp/reminder/vision');
+  },
+  // 触发久坐提醒（调用后端转发到 chatbot 的 posture_reminder）
+  sendPostureReminder() {
+    return api.post('/lamp/reminder/posture');
+  }
+};
+
 // 用户相关API
 export const userApi = {
   // 获取用户信息

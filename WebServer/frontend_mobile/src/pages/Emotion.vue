@@ -1,6 +1,6 @@
 <template>
   <div class="mobile-page">
-    <div class="page-heading">情绪监护</div>
+    <div class="page-heading">情绪监测</div>
     
     <!-- 标签页导航 -->
     <div class="emotion-tabs">
@@ -21,22 +21,6 @@
           <i class="bi bi-radar"></i>
           情绪雷达
         </button>
-        <button 
-          class="tab-btn" 
-          :class="{ active: activeTab === 'distribution' }"
-          @click="activeTab = 'distribution'"
-        >
-          <i class="bi bi-bar-chart"></i>
-          情绪分布
-        </button>
-        <button 
-          class="tab-btn" 
-          :class="{ active: activeTab === 'heatmap' }"
-          @click="activeTab = 'heatmap'"
-        >
-          <i class="bi bi-grid-3x3-gap"></i>
-          情绪热力图
-        </button>
       </div>
     </div>
 
@@ -44,7 +28,7 @@
     <div v-show="activeTab === 'trends'" class="tab-content-panel">
       <div class="mobile-card">
         <div class="mobile-card-header">
-          <div class="mobile-card-title">📈 全天情绪波动趋势</div>
+          <div class="mobile-card-title">📈 情绪波动趋势</div>
         </div>
         <div class="mobile-card-content">
           <div class="chart-container">
@@ -58,7 +42,7 @@
     <div v-show="activeTab === 'radar'" class="tab-content-panel">
       <div class="mobile-card">
         <div class="mobile-card-header">
-          <div class="mobile-card-title">📊 今日情绪多维分析</div>
+          <div class="mobile-card-title">📊 情绪多维分析</div>
         </div>
         <div class="mobile-card-content">
           <div class="chart-container">
@@ -68,33 +52,7 @@
       </div>
     </div>
 
-    <!-- 情绪分布标签页 -->
-    <div v-show="activeTab === 'distribution'" class="tab-content-panel">
-      <div class="mobile-card">
-        <div class="mobile-card-header">
-          <div class="mobile-card-title">📊 情绪时段分布</div>
-        </div>
-        <div class="mobile-card-content">
-          <div class="chart-container">
-            <div ref="barChart" class="chart-canvas"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 情绪热力图标签页 -->
-    <div v-show="activeTab === 'heatmap'" class="tab-content-panel">
-      <div class="mobile-card">
-        <div class="mobile-card-header">
-          <div class="mobile-card-title">🔥 周情绪热力图</div>
-        </div>
-        <div class="mobile-card-content">
-          <div class="chart-container">
-            <div ref="heatmapChart" class="chart-canvas"></div>
-          </div>
-        </div>
-      </div>
-    </div>
+    
 
     <!-- 实时监控标签页 -->
     <div v-show="activeTab === 'data'" class="tab-content-panel">
@@ -223,11 +181,29 @@ const activeTab = ref('trends');
 // 图表组件引用
 const trendChart = ref(null);
 const radarChart = ref(null);
-const barChart = ref(null);
-const heatmapChart = ref(null);
 
 // 图表实例
 let charts = {};
+
+// 可选 mock 开关：URL 带上 ?mockEmotion=1 将强制使用假数据
+const forceEmotionMock = typeof window !== 'undefined' && window.location.search.includes('mockEmotion=1');
+
+// 通用：强制刷新/重渲染图表，解决在隐藏容器或初始布局不完整时只显示部分的问题
+function forceRefreshChart(chart) {
+  if (!chart) return;
+  try { chart.resize && chart.resize(); } catch (_) {}
+  try {
+    const opt = chart.getOption ? chart.getOption() : null;
+    if (opt) {
+      chart.clear && chart.clear();
+      // 第二个参数 true 表示不合并，完整重设
+      chart.setOption && chart.setOption(opt, true);
+    }
+  } catch (_) {}
+  // 多次轻量 resize，保证布局稳定后仍能占满
+  setTimeout(() => { try { chart.resize && chart.resize(); } catch (_) {} }, 60);
+  setTimeout(() => { try { chart.resize && chart.resize(); } catch (_) {} }, 240);
+}
 
 // 情绪数据 - 移除不需要的属性
 const emotionData = reactive({
@@ -266,7 +242,6 @@ const initCharts = async () => {
       const labels = radar?.labels || ['专注度','愉悦度','放松度','疲劳度','压力值'];
       const current = radar?.current || [85,75,60,30,25];
       charts.radar.setOption({
-        title: { text: '今日情绪多维分析', left: 'center', top: 0 },
         tooltip: { trigger: 'item' },
         legend: { data: ['今日情绪'], bottom: 0 },
         radar: { indicator: labels.map(n => ({ name: n, max: 100 })), radius: '65%' },
@@ -277,66 +252,7 @@ const initCharts = async () => {
     }
   }
 
-  // 情绪分布柱状图
-  if (barChart.value && !charts.bar) {
-    charts.bar = echarts.init(barChart.value);
-    charts.bar.setOption({
-      title: {
-        text: '情绪时段分布',
-        subtext: '不同时段主导情绪分析',
-        left: 'center',
-        top: 0,
-        textStyle: { color: '#333', fontSize: 14, fontWeight: 'normal' },
-        subtextStyle: { color: '#666', fontSize: 12 }
-      },
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      legend: { data: ['高兴', '平静', '悲伤', '愤怒', '惊讶', '专注'], bottom: 0 },
-      grid: { left: '3%', right: '4%', bottom: '18%', containLabel: true },
-      xAxis: {
-        type: 'category',
-        data: ['上午', '中午', '下午', '晚上'],
-        axisLine: { lineStyle: { color: '#ddd' } },
-        axisLabel: { color: '#666' }
-      },
-      yAxis: {
-        type: 'value',
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: { color: '#666' },
-        splitLine: { lineStyle: { color: 'rgba(0, 0, 0, 0.05)' } }
-      },
-      series: []
-    });
-    await refreshEmotionDistribution();
-  }
-
-  // 情绪热力图（对接 /monitor/emotion/heatmap）
-  if (heatmapChart.value && !charts.heatmap) {
-    charts.heatmap = echarts.init(heatmapChart.value);
-    try {
-      const hm = await monitorApi.getEmotionHeatmap();
-      const days = hm?.days || ['周一','周二','周三','周四','周五','周六','周日'];
-      const hours = hm?.hours || ['6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22'];
-      const matrix = Array.isArray(hm?.data) ? hm.data : [];
-      const data = [];
-      for (let r=0;r<matrix.length;r++){
-        for (let c=0;c<(matrix[r]||[]).length;c++){
-          data.push([r,c,matrix[r][c]]);
-        }
-      }
-      charts.heatmap.setOption({
-        title: { text: '周情绪热力图', left: 'center', top: 0 },
-        tooltip: { position: 'top', formatter: (p)=> `${days[p.data[0]]} ${hours[p.data[1]]}<br>情绪值: ${p.data[2]}` },
-        grid: { top: '15%', left: '3%', right: '4%', bottom: '15%', containLabel: true },
-        xAxis: { type: 'category', data: days, splitArea: { show: true } },
-        yAxis: { type: 'category', data: hours, splitArea: { show: true } },
-        visualMap: { min: 0, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%' },
-        series: [{ name: '情绪值', type: 'heatmap', data, label: { show: false } }]
-      });
-    } catch(e) {
-      charts.heatmap.setOption({ series: [{ type: 'heatmap', data: [] }] });
-    }
-  }
+  
 };
 
 // 刷新图表尺寸
@@ -355,8 +271,6 @@ const watchActiveTab = () => {
   nextTick(() => {
     if (activeTab.value === 'trends' && !charts.trend) initCharts();
     if (activeTab.value === 'radar' && !charts.radar) initCharts();
-    if (activeTab.value === 'distribution' && !charts.bar) initCharts();
-    if (activeTab.value === 'heatmap' && !charts.heatmap) initCharts();
     
     // 延迟刷新图表尺寸
     setTimeout(resizeCharts, 200);
@@ -370,8 +284,6 @@ watch(activeTab, () => {
 
 onMounted(() => {
   initCharts();
-  // 首次加载拉取情绪分布
-  refreshEmotionDistribution();
   
   // 监听标签切换
   watchActiveTab();
@@ -396,49 +308,10 @@ onBeforeUnmount(() => {
   });
 });
 
-// 拉取后端情绪时段分布并更新柱状图
-async function refreshEmotionDistribution() {
-  try {
-    const resp = await monitorApi.getEmotionDistribution();
-    const timeSlots = resp?.timeSlots || ['上午','中午','下午','晚上'];
-    const emoData = resp?.emotions || {};
-    const mapping = [
-      { key: 'happy', name: '高兴', color: '#4CAF50' },
-      { key: 'neutral', name: '平静', color: '#9E9E9E' },
-      { key: 'sad', name: '悲伤', color: '#F44336' },
-      { key: 'angry', name: '愤怒', color: '#FF9800' },
-      { key: 'surprised', name: '惊讶', color: '#FFC107' },
-      { key: 'focused', name: '专注', color: '#3A86FF' }
-    ];
-    const series = mapping.map(m => ({
-      name: m.name,
-      type: 'bar',
-      stack: '情绪',
-      data: (emoData[m.key] || new Array(timeSlots.length).fill(0)),
-      itemStyle: { color: m.color }
-    }));
-    if (charts.bar) {
-      charts.bar.setOption({ xAxis: { data: timeSlots }, series });
-      setTimeout(() => charts.bar.resize(), 100);
-    }
-  } catch (e) {
-    console.error('获取情绪分布失败:', e);
-  }
-}
 </script>
 
 <style scoped>
-.page-heading {
-  font-size: 20px;
-  font-weight: 600;
-  margin-bottom: 16px;
-}
-
-/* 标签页导航 */
-.emotion-tabs {
-  margin-bottom: 16px;
-}
-
+.emotion-tabs { margin-bottom: 16px; }
 .tab-nav {
   display: flex;
   background: var(--color-card);
@@ -446,7 +319,6 @@ async function refreshEmotionDistribution() {
   padding: 4px;
   box-shadow: var(--shadow);
 }
-
 .tab-btn {
   flex: 1;
   display: flex;
@@ -460,29 +332,19 @@ async function refreshEmotionDistribution() {
   font-size: 12px;
   font-weight: 500;
   color: var(--color-text-secondary);
-  transition: var(--transition);
+  transition: all .3s ease;
   cursor: pointer;
   gap: 4px;
 }
-
-.tab-btn i {
-  font-size: 16px;
-  margin-bottom: 2px;
-}
-
+.tab-btn i { font-size: 16px; margin-bottom: 2px; }
 .tab-btn.active {
   background: var(--color-primary);
-  color: white;
+  color: #fff;
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(58, 132, 105, 0.3);
+  box-shadow: 0 2px 8px rgba(var(--color-primary-rgb), .3);
 }
+.tab-btn:hover:not(.active) { background: var(--color-card-hover); color: var(--color-text); }
 
-.tab-btn:hover:not(.active) {
-  background: var(--color-card-hover);
-  color: var(--color-text);
-}
-
-/* 标签页内容面板 */
 .tab-content-panel {
   animation: fadeIn 0.3s ease;
 }

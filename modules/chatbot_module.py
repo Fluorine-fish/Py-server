@@ -323,36 +323,39 @@ class ChatbotService:
 
         kws_models = ["Audio/Snowboy/resources/models/lampbot.pmdl"]
 
-        detector = snowboydecoder.HotwordDetector(kws_models, sensitivity=0.9)
-        print("正在监听唤醒词... 按 Ctrl+C 退出")
-        detector.start(sleep_time=0.03, stop_on_detect=True)
-        detector.terminate()
-        print("唤醒词被检测到，开始语音识别...")
-        msg = "你好，小灵"
-        self.send_message(msg) # 语音识别成功的交互
+        # detector = snowboydecoder.HotwordDetector(kws_models, sensitivity=0.9)
+        # print("正在监听唤醒词... 按 Ctrl+C 退出")
+        # detector.start(sleep_time=0.03, stop_on_detect=True)
+        # detector.terminate()
+        # print("唤醒词被检测到，开始语音识别...")
 
-        start_time = datetime.now()
-        timeout_seconds = TIME_OUT
+        # key_input
+        if input() == "s":
+            msg = "你好，小灵"
+            self.send_message(msg) # 语音识别成功的交互
 
-        for i in range(30): #允许最多30次对话，对话之后进入休眠
-            current_time = datetime.now()
-            elapsed_time = (current_time - start_time).total_seconds()
-            
-            if elapsed_time >= timeout_seconds:
-                print(f"==>对话超时({timeout_seconds}秒)，助手将进入休眠状态<==")
-                break
+            start_time = datetime.now()
+            timeout_seconds = TIME_OUT
 
-            sentence = self.my_agent.get_message()
+            for i in range(2): #允许最多30次对话，对话之后进入休眠
+                current_time = datetime.now()
+                elapsed_time = (current_time - start_time).total_seconds()
+                
+                if elapsed_time >= timeout_seconds:
+                    print(f"==>对话超时({timeout_seconds}秒)，助手将进入休眠状态<==")
+                    break
 
-            if ("休息" in sentence or "结束" in sentence or "退出" in sentence) and AUTO_RETURN:
-                print("==>检测到结束语，助手将进入休眠状态<==")
-                break
-            print(f"==>识别结果：{sentence}<==")
-            self.my_agent.send_message(sentence)
+                sentence = self.my_agent.get_message()
 
-        msg = "小灵先休息啦，有事情可以随时叫我哦！"
-        self.my_agent.speak_text(msg)
-        print("==>对话结束，助手进入休眠状态<==")
+                if ("休息" in sentence or "结束" in sentence or "退出" in sentence) and AUTO_RETURN:
+                    print("==>检测到结束语，助手将进入休眠状态<==")
+                    break
+                print(f"==>识别结果：{sentence}<==")
+                self.my_agent.send_message(sentence)
+
+        # msg = "小灵先休息啦，有事情可以随时叫我哦！"
+        # self.my_agent.speak_text(msg)
+        # print("==>对话结束，助手进入休眠状态<==")
 
     def reset(self):
         """重置对话上下文"""
@@ -380,8 +383,10 @@ def light_on():
     print("==>打开灯光<==")
     lampbot = get_lampbot_instance()
     try:
-        if (not lampbot == None) and lampbot.avilable:
-            success = lampbot.light_on()
+        # msg = "稍等我帮你开灯哦！"
+        # chatbot.speak_text(msg)  # 朗读开灯提示
+        # 使用serial_module中的send_command方法
+        success = chatbot.serial_handler.send_command(0x14, [0] * 8)
         if success:
             print("串口命令发送成功: 开灯")
             return "success"
@@ -397,8 +402,10 @@ def light_off():
     print("==>关闭灯光<==")
     lampbot = get_lampbot_instance()
     try:
-        if (not lampbot == None) and lampbot.avilable:
-            success = lampbot.light_off()
+        # msg = "稍等我帮你关灯哦！"
+        # chatbot.speak_text(msg)  # 朗读关灯提示
+        # 使用serial_module中的send_command方法
+        success = chatbot.serial_handler.send_command(0x15, [0] * 8)
         if success:
             print("串口命令发送成功: 关灯")
             return "success"
@@ -414,8 +421,10 @@ def light_brighter():
     print("==>调高灯光亮度<==")
     lampbot = get_lampbot_instance()
     try:
-        if(not lampbot == None) and lampbot.avilable:
-            success = lampbot.light_brighter()
+        # msg = "稍等我帮你调整一下哦！"
+        # chatbot.speak_text(msg) 
+        # 使用serial_module中的send_command方法
+        success = chatbot.serial_handler.send_command(0x10, [0] * 8)
         if success:
             print("串口命令发送成功: 调高灯光亮度")
             return "success"
@@ -431,8 +440,10 @@ def light_dimmer():
     print("==>调低灯光亮度<==")
     lampbot = get_lampbot_instance()
     try:
-        if (not lampbot == None) and lampbot.avilable:
-            success = lampbot.light_dimmer()
+        # msg = "稍等我帮你调整一下哦！"
+        # chatbot.speak_text(msg)
+        # 使用serial_module中的send_command方法
+        success = chatbot.serial_handler.send_command(0x11, [0] * 8)
         if success:
             print("串口命令发送成功: 调低灯光亮度")
             return "success"
@@ -448,8 +459,9 @@ def color_temperature_up():
     print("==>提升光照色温<==")
     lampbot = get_lampbot_instance()
     try:
-        if (not lampbot == None) and lampbot.avilable:
-            success = lampbot.color_temperature_up()
+        # msg = "稍等我帮你调整一下哦！"
+        # chatbot.speak_text(msg)
+        success = chatbot.serial_handler.send_command(0x12, [0] * 8)
         if success:
             print("串口命令发送成功: 提升光照色温")
             return "success"
@@ -465,8 +477,9 @@ def color_temperature_down():
     print("==>降低光照色温<==")
     lampbot = get_lampbot_instance()
     try:
-        if (not lampbot == None) and lampbot.avilable:
-            success = lampbot.color_temperature_down()
+        # msg = "稍等我帮你调整一下哦！"
+        # chatbot.speak_text(msg)
+        success = chatbot.serial_handler.send_command(0x13, [0] * 8)
         if success:
             print("串口命令发送成功: 降低光照色温")
             return "success"
@@ -494,13 +507,37 @@ def posture_reminder():
         print(f"发送坐姿提醒命令时出错: {str(e)}")
         return "坐姿提醒命令执行出错，请检查串口连接"
 
+def posture_reminder_voiced():
+    """进行坐姿提醒"""
+    print("==>进行坐姿提醒<==")
+    chatbot = get_chatbot_instance()
+    try:
+        try:
+            msg = "嗨小伙伴，长时间用眼容易疲劳哦，快休息一下吧！"
+            chatbot.speak_text(msg)
+        except Exception as e:
+            print("发送语音失败")
+        # 使用serial_module中的send_command方法
+        success = chatbot.serial_handler.send_command(0x20, [0] * 8)
+        if success:
+            print("串口命令发送成功: 坐姿提醒")
+            return "success"
+        else:
+            print("串口命令发送失败: 坐姿提醒")
+            return "串口命令发送失败，未执行坐姿提醒操作"
+    except Exception as e:
+        print(f"发送坐姿提醒命令时出错: {str(e)}")
+        return "坐姿提醒命令执行出错，请检查串口连接"
+
 def reading_mode():
     """进行阅读模式"""
     print("==>进行阅读模式<==")
     lampbot = get_lampbot_instance()
     try:
-        if (not lampbot == None) and lampbot.avilable:
-            success = lampbot.reading_mode()
+        # msg = "稍等我帮你打开阅读模式哦！"
+        # chatbot.speak_text(msg)
+        # 使用serial_module中的send_command方法
+        success = chatbot.serial_handler.send_command(0x50, [0] * 8)
         if success:
             print("串口命令发送成功: 阅读模式")
             return "success"
@@ -516,8 +553,10 @@ def learning_mode():
     print("==>进行学习模式<==")
     lampbot = get_lampbot_instance()
     try:
-        if (not lampbot == None) and lampbot.avilable:
-            success = lampbot.learning_mode()
+        # msg = "稍等我帮你打开学习模式哦！"
+        # chatbot.speak_text(msg)
+        # 使用serial_module中的send_command方法
+        success = chatbot.serial_handler.send_command(0x51, [0] * 8)
         if success:
             print("串口命令发送成功: 进行学习模式")
             return "success"
@@ -533,8 +572,31 @@ def vision_reminder():
     print("==>进行远眺提醒<==")
     lampbot = get_lampbot_instance()
     try:
-        if (not lampbot == None) and lampbot.avilable:
-            success = lampbot.vision_reminder()
+        # msg = "不如稍微休息一下，远眺一下哦！"
+        # chatbot.speak_text(msg)
+        # 使用serial_module中的send_command方法
+        success = chatbot.serial_handler.send_command(0x21, [0] * 8)
+        if success:
+            print("串口命令发送成功: 远眺提醒")
+            return "success"
+        else:
+            print("串口命令发送失败: 远眺提醒")
+            return "串口命令发送失败，未执行远眺提醒操作"
+    except Exception as e:
+        print(f"发送远眺提醒命令时出错: {str(e)}")
+        return "远眺提醒命令执行出错，请检查串口连接"
+    
+def vision_reminder_voiced():
+    """进行远眺提醒"""
+    print("==>进行远眺提醒<==")
+    chatbot = get_chatbot_instance()
+    try:
+        try:
+            msg = "嗨小伙伴，长时间用眼容易疲劳哦，快休息一下吧！"
+            chatbot.speak_text(msg)
+        except Exception as e:
+            print("发送语音失败")
+        success = chatbot.serial_handler.send_command(0x21, [0] * 8)
         if success:
             print("串口命令发送成功: 远眺提醒")
             return "success"
@@ -578,8 +640,9 @@ def arm_forward():
     print("==>机械臂向前移动<==")
     lampbot = get_lampbot_instance()
     try:
-        if (not lampbot == None) and lampbot.avilable:
-            success = lampbot.arm_forward()
+        # msg = "稍等我帮你调整一下哦！"
+        # chatbot.speak_text(msg)
+        success = chatbot.serial_handler.send_command(0x30, [0] * 8)
         if success:
             print("串口命令发送成功: 机械臂向前移动")
             return "success"
@@ -595,8 +658,9 @@ def arm_backward():
     print("==>机械臂向后移动<==")
     lampbot = get_lampbot_instance()
     try:
-        if (not lampbot == None) and lampbot.avilable:
-            success = lampbot.arm_backward()
+        # msg = "稍等我帮你调整一下哦！"
+        # chatbot.speak_text(msg)
+        success = chatbot.serial_handler.send_command(0x31, [0] * 8)
         if success:
             print("串口命令发送成功: 机械臂向后移动")
             return "success"
@@ -612,8 +676,9 @@ def arm_left():
     print("==>机械臂左转<==")
     lampbot = get_lampbot_instance()
     try:
-        if (not lampbot == None) and lampbot.avilable:
-            success = lampbot.arm_left()
+        # msg = "稍等我帮你调整一下哦！"
+        # chatbot.speak_text(msg)
+        success = chatbot.serial_handler.send_command(0x32, [0] * 8)
         if success:
             print("串口命令发送成功: 机械臂左转")
             return "success"
@@ -629,8 +694,9 @@ def arm_right():
     print("==>机械臂右转<==")
     lampbot = get_lampbot_instance()
     try:
-        if (not lampbot == None) and lampbot.avilable:
-            success = lampbot.arm_right()
+        # msg = "稍等我帮你调整一下哦！"
+        # chatbot.speak_text(msg)
+        success = chatbot.serial_handler.send_command(0x33, [0] * 8)
         if success:
             print("串口命令发送成功: 机械臂右转")
             return "success"

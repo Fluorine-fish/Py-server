@@ -328,3 +328,15 @@ class LampbotService:
 
             self.avilable = True
             return "串口命令发送失败，未执行机械臂左转操作"
+
+# ---- 全局单例访问器 ----
+_lampbot_singleton = None
+
+def get_lampbot_instance():
+    """获取 Lampbot 全局单例实例。
+    若不存在则创建，供 Web 接口与其他模块复用。
+    """
+    global _lampbot_singleton
+    if _lampbot_singleton is None:
+        _lampbot_singleton = Lampbot_Instance()
+    return _lampbot_singleton

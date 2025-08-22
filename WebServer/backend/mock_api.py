@@ -383,6 +383,52 @@ async def eye_history(timeRange: str = 'day'):
             'improvement': random.choice(['显著改善', '略有改善', '保持稳定', '略有下降'])
         }
 
+@router.get('/monitor/eye/trends')
+async def eye_trends():
+    """用眼趋势（供前端折线图使用）"""
+    labels = [f"{h:02d}:00" for h in range(6, 21, 2)]
+    data = [round(random.uniform(35.0, 50.0), 1) for _ in labels]
+    return { 'labels': labels, 'data': data }
+
+@router.get('/monitor/eye/environment')
+async def eye_environment():
+    """用眼环境指标（供雷达图使用）"""
+    indicators = ['环境亮度', '坐姿稳定', '眨眼频率', '距离安全', '专注度']
+    current = [random.randint(60, 90) for _ in indicators]
+    return { 'labels': indicators, 'current': current }
+
+@router.get('/monitor/eye/heatmap')
+async def eye_heatmap():
+    """用眼热力图（周×小时）"""
+    days = ['周一','周二','周三','周四','周五','周六','周日']
+    hours = [str(h) for h in range(6, 23)]
+    matrix = []
+    for r in range(len(days)):
+        row = []
+        for c, h in enumerate(range(6, 23)):
+            base = 0.4
+            if 12 <= h <= 14:
+                base = 0.6
+            elif 15 <= h <= 19:
+                base = 0.75
+            elif h >= 20:
+                base = 0.55
+            if r >= 5:
+                base += 0.08
+            row.append(round(max(0, min(1, base + (c % 3) * 0.05)), 2))
+        matrix.append(row)
+    return { 'days': days, 'hours': hours, 'data': matrix }
+
+@router.get('/monitor/eye/data')
+async def eye_detail_data():
+    """用眼详情小卡数据"""
+    return {
+        'blinkRate': random.randint(15, 25),
+        'avgDistance': round(random.uniform(40.0, 46.0), 1),
+        'screenTime': random.randint(2, 6) * 3600,
+        'warningCount': random.randint(0, 4)
+    }
+
 @router.get('/monitor/emotion')
 async def emotion_data():
     """返回情绪监测数据"""
@@ -408,6 +454,134 @@ async def emotion_data():
         'confidence': round(random.uniform(0.75, 0.98), 2),
         'history': history
     }
+
+@router.get('/monitor/emotion/trends')
+async def emotion_trends():
+    """情绪趋势（0-1）"""
+    labels = [f"{h:02d}:00" for h in range(6, 22, 2)]
+    # 早上平稳，中午略高，下午/傍晚更活跃，晚上回落
+    data = []
+    for h in range(6, 22, 2):
+        base = 0.35
+        if 12 <= h <= 14:
+            base = 0.55
+        elif 15 <= h <= 19:
+            base = 0.72
+        elif h >= 20:
+            base = 0.5
+        data.append(round(max(0, min(1, base + random.uniform(-0.05, 0.06))), 2))
+    return { 'labels': labels, 'data': data }
+
+@router.get('/monitor/emotion/distribution')
+async def emotion_distribution():
+    """情绪时段分布（每段加总约100）"""
+    time_slots = ['上午', '中午', '下午', '晚上']
+    # 基于时段生成分布
+    def slot():
+        happy = random.randint(22, 38)
+        neutral = random.randint(28, 42)
+        sad = random.randint(6, 14)
+        angry = random.randint(4, 10)
+        surprised = random.randint(8, 14)
+        focused = 100 - (happy + neutral + sad + angry + surprised)
+        return [happy, neutral, sad, angry, surprised, max(6, focused)]
+    cols = list(zip(*(slot() for _ in time_slots)))
+    emotions = {
+        'happy':     list(cols[0]),
+        'neutral':   list(cols[1]),
+        'sad':       list(cols[2]),
+        'angry':     list(cols[3]),
+        'surprised': list(cols[4]),
+        'focused':   list(cols[5])
+    }
+    return { 'timeSlots': time_slots, 'emotions': emotions }
+
+@router.get('/monitor/emotion/radar')
+async def emotion_radar():
+    """情绪多维雷达"""
+    labels = ['专注度','愉悦度','放松度','疲劳度','压力值']
+    current = [random.randint(60, 90) for _ in labels]
+    return { 'labels': labels, 'current': current }
+
+
+@router.get('/monitor/emotion/distribution')
+async def emotion_distribution():
+    """情绪时段分布（每段加总约100）"""
+    time_slots = ['上午', '中午', '下午', '晚上']
+    
+    # 定义不同时段的情绪基线
+    base_emotions = {
+        '上午': {'happy': 30, 'neutral': 40, 'sad': 8, 'angry': 5, 'surprised': 10, 'focused': 7},
+        '中午': {'happy': 40, 'neutral': 30, 'sad': 5, 'angry': 5, 'surprised': 12, 'focused': 8},
+        '下午': {'happy': 25, 'neutral': 35, 'sad': 12, 'angry': 8, 'surprised': 10, 'focused': 10},
+        '晚上': {'happy': 35, 'neutral': 45, 'sad': 5, 'angry': 3, 'surprised': 7, 'focused': 5}
+    }
+    
+    emotions = {
+        'happy': [], 'neutral': [], 'sad': [], 'angry': [], 'surprised': [], 'focused': []
+    }
+    
+    for slot in time_slots:
+        total = 0
+        temp_emotions = {}
+        for emotion, base in base_emotions[slot].items():
+            value = base + random.randint(-5, 5)
+            temp_emotions[emotion] = value
+            total += value
+        
+        # 归一化到100
+        for emotion in temp_emotions:
+            temp_emotions[emotion] = round(temp_emotions[emotion] / total * 100)
+        
+        # 修正总和为100
+        current_sum = sum(temp_emotions.values())
+        if current_sum != 100:
+            diff = 100 - current_sum
+            # 加到值最大的情绪上
+            max_emotion = max(temp_emotions, key=temp_emotions.get)
+            temp_emotions[max_emotion] += diff
+
+        for emotion, value in temp_emotions.items():
+            emotions[emotion].append(value)
+            
+    return { 'timeSlots': time_slots, 'emotions': emotions }
+
+@router.get('/monitor/emotion/heatmap')
+async def emotion_heatmap():
+    """周情绪热力图（值 0-1）"""
+    days = ['周一','周二','周三','周四','周五','周六','周日']
+    hours = [str(h) for h in range(6, 23)]
+    matrix: List[List[float]] = []
+    
+    for r in range(len(days)):
+        row: List[float] = []
+        for c, h_str in enumerate(hours):
+            h = int(h_str)
+            
+            # 基础情绪值，模拟一天中的情绪波动
+            base = 0.4
+            if 8 <= h < 12: # 上午学习
+                base = 0.6 + random.uniform(-0.1, 0.1)
+            elif 12 <= h < 14: # 午休
+                base = 0.3 + random.uniform(-0.1, 0.1)
+            elif 14 <= h < 18: # 下午学习
+                base = 0.7 + random.uniform(-0.15, 0.15)
+            elif 18 <= h < 21: # 晚上放松
+                base = 0.5 + random.uniform(-0.1, 0.1)
+            else: # 早晚
+                base = 0.2 + random.uniform(-0.1, 0.1)
+            
+            # 周末情绪更放松
+            if r >= 5:
+                base += 0.15
+            
+            # 增加随机性
+            val = max(0, min(1, base + random.uniform(-0.1, 0.1)))
+            row.append(round(val, 2))
+        matrix.append(row)
+        
+    return { 'days': days, 'hours': hours, 'data': matrix }
+
 
 # API路由 - 视频流（展示版：固定返回 static/home.jpg）
 @router.get('/video')

@@ -491,9 +491,9 @@ onMounted(async () => {
 }
 
 .tool-text-unified {
-  font-size: 16px; /* 放大按钮文字 */
+  font-size: 13px; /* 放大按钮文字 */
   color: var(--color-text);
-  font-weight: 600; /* 稍微减轻一点粗细 */
+  font-weight: 800; /* 稍微减轻一点粗细 */
   text-align: left; /* 左对齐 */
   line-height: 1.2;
   flex: 1; /* 占据剩余空间 */
@@ -570,17 +570,21 @@ onMounted(async () => {
     gap: 6px;
   }
   
-  .tool-button-unified {
-    min-height: 60px !important;
-    padding: 12px 16px;
-    min-width: 100% !important;
-    flex: none !important;
-    max-width: 100% !important;
-    box-sizing: border-box !important;
-    flex-direction: row !important; /* 保持水平排列 */
-    justify-content: flex-start !important;
-    gap: 12px;
-  }
+.tool-button-unified {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  border-radius: 16px;
+  background: #f9fafb;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  border: 1px solid #e5e7eb;
+  flex-shrink: 0;          /* 防止被压缩 */
+  width: auto;             /* 自适应内容宽度 */
+  min-width: fit-content;  /* 保证不比内容小 */
+}
 
   .tool-icon-unified {
     width: 24px !important;
@@ -603,22 +607,21 @@ onMounted(async () => {
     padding: 0 !important;
     margin: 0 !important; /* 去掉边距 */
     
-    font-size: 14px; /* 响应式下的图标字体 */
+    font-size: 13px; /* 响应式下的图标字体 */
     
     box-shadow: 0 1px 3px rgba(108, 117, 125, 0.2) !important;
   }
   
   .tool-text-unified {
-  font-size: 14px; /* 响应式下放大后的文字字体 */
-    font-weight: 600; /* 保持适中粗细 */
+    font-size: 13px;
+    color: var(--color-text);
+    font-weight: 600;
     text-align: left;
-    display: -webkit-box;
-    -webkit-line-clamp: 2; /* 强制两行显示 */
-    line-clamp: 2; /* 标准属性 */
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    word-break: break-all; /* 强制换行 */
-    flex: 1;
+    line-height: 1.2;
+    white-space: nowrap;      /* 强制单行 */
+    overflow: hidden;         /* 溢出隐藏 */
+    text-overflow: ellipsis;  /* 超出部分用省略号 */
+    word-break: keep-all;     /* 不要随意断开中文 */
   }
 }
 </style>
